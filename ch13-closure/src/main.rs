@@ -74,7 +74,10 @@ fn main() {
     ];
 
     l2.sort_by_key(|s| s.width);
+
+    let l3: Vec<_> = l2.iter().filter(|s| s.width > 5).collect();
     println!("{l2:?}");
+    println!("{l3:?}");
 
     for val in l2.iter() {
         println!("{val:?}");
