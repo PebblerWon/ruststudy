@@ -316,42 +316,260 @@ pub struct JsonFileStore {
 
 ### 4.3 业务逻辑层 (`service.rs`)
 
+#### 结构体定义
+
 ```rust
 pub struct TaskService {
     store: JsonFileStore,
 }
+```
 
-impl TaskService {
-    pub fn new() -> Result<Self> { ... }
+#### TaskStats 统计结构体
 
-    // 创建任务
-    pub fn add_task(&self, title: &str, desc: Option<&str>,
-                    priority: Priority, tags: Vec<String>,
-                    due: Option<NaiveDate>) -> Result<Task> {
-        // 1. 校验标题长度
-        // 2. 生成 UUID
-        // 3. 设置 created_at, updated_at
-        // 4. 默认 status = Todo
-        // 5. 加载 → 追加 → 保存
-        // 6. 返回新任务
-    }
+```rust
+pub struct TaskStats {
+    pub total: usize,
+    pub todo: usize,
+    pub in_progress: usize,
+    pub done: usize,
+    pub high: usize,
+    pub medium: usize,
+    pub low: usize,
+    pub overdue: usize,       // 已逾期（due_date < 今天 且 status != Done）
+    pub completion_rate: f64,  // 完成率 = done / total
+}
+```
 
-    // 列出任务（支持筛选）
-    pub fn list_tasks(&self, status: Option<Status>,
-                      priority: Option<Priority>,
-                      tag: Option<&str>) -> Result<Vec<Task>> { ... }
+#### 方法清单
 
-    // 更新任务
-    pub fn update_task(&self, id: &str, ...) -> Result<Task> { ... }
+| 方法 | 签名 | 职责 |
+|------|------|------|
+| `new` | `() -> Result<Self>` | 构造 service，初始化 store |
+| `add_task` | `(title, desc, priority, tags, due) -> Result<Task>` | 创建任务 |
+| `list_tasks` | `(status, priority, tag) -> Result<Vec<Task>>` | 列出/筛选任务 |
+| `update_task` | `(id, title, status, priority, desc, tags, due) -> Result<Task>` | 更新任务 |
+| `delete_task` | `(id) -> Result<Task>` | 删除任务 |
+| `search_tasks` | `(keyword) -> Result<Vec<Task>>` | 搜索任务 |
+| `get_stats` | `() -> Result<TaskStats>` | 统计信息 |
+| `export_tasks` | `(format, output) -> Result<String>` | 导出数据 |
+| `find_task_by_id` | `(tasks, id) -> Result<usize>` | 内部辅助：按 ID 查找索引 |
+| `validate_title` | `(title) -> Result<()>` | 内部辅助：校验标题 |
+| `parse_due_date` | `(due) -> Result<Option<NaiveDate>>` | 内部辅助：解析日期字符串 |
 
-    // 删除任务
-    pub fn delete_task(&self, id: &str) -> Result<Task> { ... }
+#### 方法详细设计
 
-    // 搜索任务
-    pub fn search_tasks(&self, keyword: &str) -> Result<Vec<Task>> { ... }
+##### `new()` — 构造函数
 
-    // 统计
-    pub fn get_stats(&self) -> Result<TaskStats> { ... }
+```
+输入：无
+输出：Result<TaskService>
+流程：
+  1. 调用 JsonFileStore::new() 创建存储实例
+  2. 返回 TaskService { store }
+```
+
+##### `add_task()` — 创建任务（对应 PRD F1）
+
+```
+输入：
+  - title: &str           必填，1~100 字符
+  - desc: Option<&str>    可选描述
+  - priority: Priority    默认 medium
+  - tags: Vec<String>     可选标签列表
+  - due: Option<&str>     可选截止日期字符串 "YYYY-MM-DD"
+输出：Result<Task>        返回创建成功的完整 Task
+流程：
+  1. 调用 validate_title(title) 校验标题
+  2. 调用 parse_due_date(due) 解析截止日期，格式错误返回 TaskError::InvalidDate
+  3. 生成 UUID v4 作为 id
+  4. 构造 Task：
+     - status = Status::Todo
+     - created_at = Utc::now()
+     - updated_at = Utc::now()
+  5. store.load() 加载现有任务
+  6. 追加新任务到 Vec
+  7. store.save() 保存
+  8. 返回新 Task
+错误：
+  - TaskError::EmptyTitle        标题为空
+  - TaskError::TitleTooLong      标题超 100 字符
+  - TaskError::InvalidDate       日期格式错误
+```
+
+##### `list_tasks()` — 列出任务（对应 PRD F2）
+
+```
+输入：
+  - status: Option<Status>      按状态筛选
+  - priority: Option<Priority>  按优先级筛选
+  - tag: Option<&str>           按标签筛选（包含匹配）
+输出：Result<Vec<Task>>
+流程：
+  1. store.load() 加载所有任务
+  2. 依次应用筛选条件（全部为 Option，None 表示不过滤）：
+     - status 不为 None → 保留 status 相等的任务
+     - priority 不为 None → 保留 priority 相等的任务
+     - tag 不为 None → 保留 tags 中包含该标签的任务
+  3. 返回筛选后的 Vec
+```
+
+##### `update_task()` — 更新任务（对应 PRD F3）
+
+```
+输入：
+  - id: &str                    任务 ID（支持前缀匹配，至少 1 字符）
+  - title: Option<&str>         新标题
+  - status: Option<Status>      新状态
+  - priority: Option<Priority>  新优先级
+  - desc: Option<&str>          新描述
+  - tags: Option<Vec<String>>   新标签（覆盖）
+  - due: Option<&str>           新截止日期
+输出：Result<Task>              返回更新后的 Task
+流程：
+  1. store.load() 加载所有任务
+  2. 调用 find_task_by_id() 查找目标索引，未找到返回 TaskError::NotFound
+  3. 若 title 不为 None，调用 validate_title() 校验
+  4. 若 due 不为 None，调用 parse_due_date() 解析
+  5. 逐字段更新（仅更新 Some 的字段）：
+     - title → task.title
+     - status → task.status
+     - priority → task.priority
+     - desc → task.description（Some 设置, None 不修改）
+     - tags → task.tags
+     - due → task.due_date
+  6. 更新 task.updated_at = Utc::now()
+  7. store.save() 保存
+  8. 返回更新后的 Task（clone）
+错误：
+  - TaskError::NotFound(id)      任务不存在
+  - TaskError::EmptyTitle        新标题为空
+  - TaskError::TitleTooLong      新标题超长
+  - TaskError::InvalidDate       日期格式错误
+```
+
+##### `delete_task()` — 删除任务（对应 PRD F4）
+
+```
+输入：
+  - id: &str   任务 ID（支持前缀匹配）
+输出：Result<Task>  返回被删除的 Task
+流程：
+  1. store.load() 加载所有任务
+  2. 调用 find_task_by_id() 查找目标索引，未找到返回 TaskError::NotFound
+  3. 从 Vec 中 remove 该任务
+  4. store.save() 保存
+  5. 返回被删除的 Task
+错误：
+  - TaskError::NotFound(id)
+```
+
+##### `search_tasks()` — 搜索任务（对应 PRD F5）
+
+```
+输入：
+  - keyword: &str   搜索关键字
+输出：Result<Vec<Task>>
+流程：
+  1. store.load() 加载所有任务
+  2. 过滤：title 或 description 中包含 keyword（忽略大小写）
+     - title.contains(keyword) || description.unwrap_or("").contains(keyword)
+  3. 返回匹配结果
+```
+
+##### `get_stats()` — 统计信息（对应 PRD F6）
+
+```
+输入：无
+输出：Result<TaskStats>
+流程：
+  1. store.load() 加载所有任务
+  2. 统计：
+     - total = tasks.len()
+     - todo = 计数 status == Todo
+     - in_progress = 计数 status == InProgress
+     - done = 计数 status == Done
+     - high/medium/low = 按 priority 计数
+     - overdue = 计数 due_date < Utc::now().date() 且 status != Done
+     - completion_rate = if total == 0 { 0.0 } else { done as f64 / total as f64 }
+  3. 返回 TaskStats
+```
+
+##### `export_tasks()` — 导出数据（对应 PRD F8）
+
+```
+输入：
+  - format: &str             导出格式，当前仅支持 "csv"
+  - output: Option<&str>     输出文件路径，None 则输出到 stdout
+输出：Result<String>         返回导出文件路径或内容
+流程：
+  1. store.load() 加载所有任务
+  2. 使用 csv crate 序列化 tasks 为 CSV 格式
+  3. 若 output 不为 None → 写入文件，返回文件路径
+  4. 若 output 为 None → 返回 CSV 字符串
+```
+
+#### 内部辅助方法
+
+##### `validate_title()` — 标题校验
+
+```
+输入：title: &str
+输出：Result<()>
+规则：
+  - 空字符串 → TaskError::EmptyTitle
+  - 长度 > 100 → TaskError::TitleTooLong
+  - 否则 → Ok(())
+```
+
+##### `parse_due_date()` — 日期解析
+
+```
+输入：due: Option<&str>
+输出：Result<Option<NaiveDate>>
+规则：
+  - None → Ok(None)
+  - Some(s) → NaiveDate::parse_from_str(s, "%Y-%m-%d")
+    - 成功 → Ok(Some(date))
+    - 失败 → Err(TaskError::InvalidDate)
+```
+
+##### `find_task_by_id()` — ID 查找
+
+```
+输入：tasks: &[Task], id: &str
+输出：Result<usize>  返回索引
+规则：
+  - 支持前缀匹配：task.id.starts_with(id)
+  - 匹配 0 个 → TaskError::NotFound(id)
+  - 匹配多个 → TaskError::AmbiguousId(id)（可选，增强体验）
+  - 匹配 1 个 → Ok(index)
+```
+
+#### 错误类型（`error.rs`）
+
+```rust
+#[derive(Error, Debug)]
+pub enum TaskError {
+    #[error("任务不存在: {0}")]
+    NotFound(String),
+
+    #[error("标题不能为空")]
+    EmptyTitle,
+
+    #[error("标题长度不能超过 100 个字符")]
+    TitleTooLong,
+
+    #[error("日期格式错误，请使用 YYYY-MM-DD 格式")]
+    InvalidDate,
+
+    #[error("ID 匹配到多个任务: {0}")]
+    AmbiguousId(String),
+
+    #[error("数据文件读取失败: {0}")]
+    StoreLoadError(#[from] std::io::Error),
+
+    #[error("数据解析失败: {0}")]
+    ParseError(#[from] serde_json::Error),
 }
 ```
 
