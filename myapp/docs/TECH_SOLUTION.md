@@ -203,36 +203,110 @@ pub struct Task {
 
 ### 4.2 存储层 (`store.rs`)
 
+#### 文件路径规范
+
+| 项目 | 值 |
+|------|------|
+| 数据目录 | `~/.taskflow/` |
+| 主数据文件 | `data.json` |
+| 备份文件 | `data.json.bak` |
+| 完整路径示例 (Windows) | `C:\Users\xyzq\.taskflow\data.json` |
+| 完整路径示例 (Linux/Mac) | `/home/xyzq/.taskflow/data.json` |
+
+#### Store Trait 接口
+
 ```rust
-// 定义 trait 接口，方便测试和未来扩展
 pub trait Store {
+    /// 加载所有任务
     fn load(&self) -> Result<Vec<Task>>;
+    
+    /// 保存所有任务（覆盖写入）
     fn save(&self, tasks: &[Task]) -> Result<()>;
 }
+```
 
+#### JsonFileStore 结构
+
+```rust
 pub struct JsonFileStore {
-    file_path: PathBuf,
-}
-
-impl JsonFileStore {
-    pub fn new() -> Result<Self> { ... }
-    // 获取数据目录：~/.taskflow/
-    fn data_dir() -> Result<PathBuf> { ... }
-    // 写入前备份
-    fn backup(&self) -> Result<()> { ... }
-}
-
-impl Store for JsonFileStore {
-    fn load(&self) -> Result<Vec<Task>> {
-        // 文件不存在 → 返回空 Vec
-        // 文件存在 → 读取并反序列化
-    }
-    fn save(&self, tasks: &[Task]) -> Result<()> {
-        // 先备份旧文件
-        // 序列化并写入
-    }
+    file_path: PathBuf,  // 例如: ~/.taskflow/data.json
 }
 ```
+
+#### 需要用到的 API
+
+**目录与路径操作：**
+
+| API | 用途 | 示例 |
+|-----|------|------|
+| `dirs::home_dir()` | 获取用户 home 目录 | `Some("/home/xyzq")` |
+| `PathBuf::push()` | 拼接路径 | `path.push(".taskflow")` |
+| `std::fs::create_dir_all()` | 递归创建目录 | 创建 `~/.taskflow/` |
+| `Path::exists()` | 检查文件是否存在 | 判断 `data.json` 是否存在 |
+
+**文件读写：**
+
+| API | 用途 | 示例 |
+|-----|------|------|
+| `std::fs::read_to_string()` | 读取文件内容为字符串 | 读取 JSON |
+| `std::fs::write()` | 写入字符串到文件 | 写入 JSON |
+| `std::fs::copy()` | 复制文件（用于备份） | `data.json` → `data.json.bak` |
+
+**JSON 序列化：**
+
+| API | 用途 | 示例 |
+|-----|------|------|
+| `serde_json::from_str::<Vec<Task>>()` | JSON 字符串 → Vec<Task> | 反序列化 |
+| `serde_json::to_string_pretty()` | Vec<Task> → 格式化 JSON | 序列化（带缩进，便于阅读） |
+
+#### 实现流程
+
+**`new()` 构造函数：**
+```
+1. 获取 home_dir
+2. 拼接路径: home/.taskflow/data.json
+3. 确保目录存在: create_dir_all(".taskflow")
+4. 返回 JsonFileStore { file_path }
+```
+
+**`load()` 加载：**
+```
+1. 检查文件是否存在
+   - 不存在 → 返回 Ok(vec![])
+   - 存在 → 继续
+2. 读取文件内容: read_to_string()
+3. 反序列化: serde_json::from_str()
+4. 返回 Ok(tasks)
+```
+
+**`save()` 保存：**
+```
+1. 备份旧文件（如果存在）
+   - copy("data.json", "data.json.bak")
+2. 序列化: serde_json::to_string_pretty()
+3. 写入文件: write()
+4. 返回 Ok(())
+```
+
+#### 错误处理
+
+| 场景 | 错误信息 |
+|------|----------|
+| 无法获取 home 目录 | `"无法获取用户主目录"` |
+| 创建目录失败 | `"创建数据目录失败: {err}"` |
+| 读取文件失败 | `"读取数据文件失败: {err}"` |
+| JSON 解析失败 | `"数据文件格式错误: {err}"` |
+| 写入文件失败 | `"写入数据文件失败: {err}"` |
+
+#### 测试建议
+
+| 测试场景 | 方法 |
+|----------|------|
+| 空文件加载 | 文件不存在时返回空 Vec |
+| 正常读写 | 写入后读取，验证数据一致 |
+| 备份机制 | 写入两次，验证 `.bak` 文件存在 |
+
+测试时使用 `tempfile::tempdir()` 创建临时目录，避免污染真实数据。
 
 **设计要点：**
 - 使用 `trait` 抽象存储接口，测试时可注入 `MemoryStore`

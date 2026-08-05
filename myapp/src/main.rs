@@ -1,10 +1,13 @@
 mod models;
 mod store;
-use crate::models::{Task, Status, Priority};
-use chrono::{DateTime, NaiveDate, Utc };
+mod cli;
+use crate::{cli::Cli, models::{Priority, Status, Task}, store::{JsonFileStore,Store}};
+use chrono::{NaiveDate, Utc };
+use clap::Parser;
 
 fn main() {
-    let task = Task { 
+    let cli = Cli::parse();
+    let task1 = Task { 
         id:String::from("1"),
         title: "学习Rust所有权".to_string(),
         description:None,
@@ -15,9 +18,9 @@ fn main() {
         created_at: Utc::now(),
         updated_at: Utc::now(),
     };
-    println!("{}", task);
-    let task = Task { 
-        id:String::from("1"),
+    println!("{}", task1);
+    let task2 = Task { 
+        id:String::from("2"),
         title: "学习Rust所有权".to_string(),
         description:None,
         status: Status::InProgress,
@@ -27,5 +30,11 @@ fn main() {
         created_at: Utc::now(),
         updated_at: Utc::now(),
     };
-    println!("{}", task);
+    println!("{}", task2);
+    let t = JsonFileStore::new().unwrap();
+    let r = t.load().unwrap();
+    println!("{:?}",r);
+    let tasks = vec![task1,task2];
+    t.save(&tasks).unwrap();
+    
 }
