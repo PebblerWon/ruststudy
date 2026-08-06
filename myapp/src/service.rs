@@ -74,20 +74,48 @@ impl TaskService {
 
         Ok(task)
     }
+
+    pub fn list_tasks(
+        &self,
+        status: Option<Status>,
+        priority: Option<Priority>,
+        tag: Option<&str>,
+    ) -> Result<Vec<Task>> {
+        let mut tasks = self.store.load()?;
+
+        if let Some(s) = status {
+            tasks = tasks.into_iter().filter(|t| t.status == s).collect();
+        }
+        if let Some(p) = priority {
+            tasks = tasks.into_iter().filter(|t| t.priority == p).collect();
+        }
+        if let Some(arg_tag) = tag {
+            tasks = tasks
+                .into_iter()
+                .filter(|t| {
+                    (&t.tags)
+                        .into_iter()
+                        .any(|cur_tag| cur_tag.contains(arg_tag))
+                })
+                .collect();
+        }
+        Ok(tasks)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::store::tests;
+    use chrono::{NaiveDate, TimeZone, Utc};
 
-    fn create_temp_services() -> Result<TaskService> {
-        let store = tests::temp_store("service");
+    fn create_temp_services(test_name: &str) -> Result<TaskService> {
+        let store = tests::temp_store(test_name);
         TaskService::with_store(store)
     }
     #[test]
     fn test_add_task() {
-        let services = create_temp_services().unwrap();
+        let services = create_temp_services("service_add_task").unwrap();
         let t = services
             .add_task("测试", Some("测试desc"), None, vec!["1"], None)
             .unwrap();
@@ -96,6 +124,65 @@ mod tests {
         let tasks = services.store.load().unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].id, t.id);
+        tests::cleanup(&services.store);
+    }
+
+    #[test]
+    fn test_list_task() {
+        let services = create_temp_services("service_list_task").unwrap();
+        let tasks = [
+            Task {
+                id: "1".to_string(),
+                title: format!("任务1"),
+                description: None,
+                status: Status::Todo,
+                priority: Priority::Low,
+                due_date: None,
+                tags: vec!["1".to_string()],
+                created_at: Utc.with_ymd_and_hms(2026, 1, 1, 1, 1, 1).unwrap(),
+                updated_at: Utc.with_ymd_and_hms(2026, 1, 1, 1, 1, 1).unwrap(),
+            },
+            Task {
+                id: "3".to_string(),
+                title: format!("任务3"),
+                description: None,
+                status: Status::Done,
+                priority: Priority::High,
+                due_date: None,
+                tags: vec!["2".to_string()],
+                created_at: Utc.with_ymd_and_hms(2026, 1, 1, 1, 1, 1).unwrap(),
+                updated_at: Utc.with_ymd_and_hms(2026, 1, 1, 1, 1, 1).unwrap(),
+            },
+            Task {
+                id: "2".to_string(),
+                title: format!("任务2"),
+                description: None,
+                status: Status::InProgress,
+                priority: Priority::Medium,
+                due_date: None,
+                tags: vec!["3".to_string()],
+                created_at: Utc.with_ymd_and_hms(2026, 1, 1, 1, 1, 1).unwrap(),
+                updated_at: Utc.with_ymd_and_hms(2026, 1, 1, 1, 1, 1).unwrap(),
+            },
+        ];
+        services.store.save(&tasks);
+
+        let list1 = services.list_tasks(Some(Status::Done), None, None).unwrap();
+
+        assert_eq!(list1.len(), 1);
+        let list2 = services
+            .list_tasks(None, Some(Priority::High), None)
+            .unwrap();
+        assert_eq!(list2.len(), 1);
+
+        let list3 = services.list_tasks(None, None, Some("1")).unwrap();
+        assert_eq!(list3.len(), 1);
+
+        let list4 = services
+            .list_tasks(Some(Status::InProgress), Some(Priority::Medium), Some("3"))
+            .unwrap();
+        assert_eq!(list4.len(), 1);
+
         tests::cleanup(&services.store);
     }
 }

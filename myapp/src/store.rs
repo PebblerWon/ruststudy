@@ -71,7 +71,7 @@ pub mod tests {
     use std::path::PathBuf;
     use std::{fs, result};
 
-    fn mock_task(id: &str) -> Task {
+    pub fn mock_task(id: &str) -> Task {
         Task {
             id: id.to_string(),
             title: format!("任务{}", id),
