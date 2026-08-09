@@ -55,12 +55,13 @@
     - `delete_task()`：查找并删除
   - **产出：** `src/service.rs`
 
-- [✅] **T1.6 端到端串联**
+- [x] **T1.6 端到端串联** ✅
   - `main.rs` 中解析 CLI 参数，调用 service，输出结果
   - 实现基本的成功/错误输出
   - 手动测试所有命令
   - **产出：** 基础功能端到端可用
   - **技术方案：** 见 [TECH_SOLUTION.md § 4.7](docs/TECH_SOLUTION.md)
+  - **实现要点：** dispatch 已覆盖 Add/List/Update/Delete/Search，Stats/Export 走 `anyhow::bail!` stub（按技术方案约定）
 
 **阶段一验收：**
 
@@ -79,16 +80,17 @@ taskflow delete <id>
 
 ### 任务清单
 
-- [ ] **T2.1 列表筛选增强**
+- [✅] **T2.1 列表筛选增强**
   - 在 `list` 命令中支持 `--status`、`--priority`、`--tag` 筛选
   - 在 service 层实现筛选逻辑
   - **产出：** 筛选功能可用
 
-- [ ] **T2.2 搜索功能**
+- [x] **T2.2 搜索功能** ✅
   - 新增 `search` 子命令
   - 实现关键字模糊匹配（标题 + 描述）
   - 以表格展示结果
   - **产出：** `taskflow search <keyword>` 可用
+  - **实现要点：** 大小写不敏感（双方 `to_lowercase()`），title/description 任一命中即返回；空 keyword 返回所有任务
 
 - [ ] **T2.3 表格与彩色输出**
   - 使用 `comfy-table` 渲染表格
@@ -179,9 +181,9 @@ taskflow --help               # 帮助信息完整
 | T1.3 | ✅ 已完成 | 2026-08-08 | 2026-08-08 | JsonFileStore + 临时目录测试   |
 | T1.4 | ✅ 已完成 | 2026-08-08 | 2026-08-08 | clap derive 子命令齐全         |
 | T1.5 | ✅ 已完成 | 2026-08-08 | 2026-08-08 | TaskService 增删改查 + 校验    |
-| T1.6 | 🔵 进行中 | 2026-08-09 |            | main.rs 仍为硬编码示例，待串联 |
+| T1.6 | ✅ 已完成 | 2026-08-09 | 2026-08-09 | main.rs dispatch：Add/List/Update/Delete/Search |
 | T2.1 | ⬜ 待开始 |            |            |                                |
-| T2.2 | ⬜ 待开始 |            |            |                                |
+| T2.2 | ✅ 已完成 | 2026-08-09 | 2026-08-09 | search_task：大小写不敏感 + 单元测试 |
 | T2.3 | ⬜ 待开始 |            |            |                                |
 | T2.4 | ⬜ 待开始 |            |            |                                |
 | T3.1 | ⬜ 待开始 |            |            |                                |

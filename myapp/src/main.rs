@@ -61,13 +61,24 @@ fn run() -> Result<()> {
                 service.update_task(&id, title.as_deref(), status, priority, None, None, None)?;
             println!("✓ 任务已更新：{}", task);
         }
-        Commands::Delete { id, force:_ } => {
+        Commands::Delete { id, force: _ } => {
             let deleted = service.delete_task(&id)?;
 
             println!("✓ 已删除任务：{} ({})", deleted.title, deleted.id);
         }
+        Commands::Search { keyword } => {
+            let res = service.search_task(keyword.as_str())?;
+            if res.is_empty() {
+                println!("未找到匹配任务")
+            } else {
+                println!("✓ 搜索到 {} 条结果：", res.len());
+                for i in &res {
+                    println!("{i}");
+                }
+            }
+        }
         // 阶段二/三实现
-        Commands::Search { .. } | Commands::Stats | Commands::Export { .. } => {
+        Commands::Stats | Commands::Export { .. } => {
             anyhow::bail!("该命令将在后续阶段实现");
         }
     }

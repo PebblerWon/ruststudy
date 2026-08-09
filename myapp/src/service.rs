@@ -171,14 +171,35 @@ impl TaskService {
         self.store.save(&tasks)?;
         Ok(updated_task)
     }
+
+    pub fn search_task(&self, keyword: &str) -> Result<Vec<Task>> {
+        let tasks = self.store.load()?;
+        let keyword_lower = keyword.to_lowercase();
+
+        let res = tasks
+            .into_iter()
+            .filter(|i| {
+                let desc_match = i
+                    .description
+                    .as_deref()
+                    .map_or(false, |d| d.to_lowercase().contains(&keyword_lower));
+                i.title.to_lowercase().contains(&keyword_lower) || desc_match
+            })
+            .collect();
+        Ok(res)
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::fmt::{Debug, Display};
+    use std::{
+        assert_eq,
+        fmt::{Debug, Display},
+        vec,
+    };
 
     use super::*;
-    use crate::store::tests;
+    use crate::{service, store::tests};
     use chrono::{NaiveDate, TimeZone, Utc};
 
     fn create_temp_services(test_name: &str) -> Result<TaskService> {
@@ -190,7 +211,7 @@ mod tests {
             Task {
                 id: "1".to_string(),
                 title: format!("任务1"),
-                description: None,
+                description: Some("任务1".to_string()),
                 status: Status::Todo,
                 priority: Priority::Low,
                 due_date: None,
@@ -313,6 +334,44 @@ mod tests {
         );
         assert!(updated_item.updated_at > mock_data[0].updated_at);
         assert_eq!(updated_item.created_at, mock_data[0].created_at);
+
+        tests::cleanup(&services.store);
+    }
+
+    #[test]
+    fn test_search_task() {
+        let services = create_temp_services("test_search_task").unwrap();
+
+        let mock_data = mock_tasks();
+        let _ = services.store.save(&mock_data);
+
+        services
+            .add_task(
+                "务1",
+                Some("任务1描述"),
+                Some(Priority::Low),
+                vec!["tag1"],
+                None,
+            )
+            .unwrap();
+        services
+            .add_task("abc", Some("DEF"), Some(Priority::Low), vec!["tag1"], None)
+            .unwrap();
+
+        let search_title_res = services.search_task("务1").unwrap();
+        assert_eq!(search_title_res.len(), 2);
+
+        let search_desc_res = services.search_task("描述").unwrap();
+        assert_eq!(search_desc_res.len(), 1);
+
+        let search_none_res = services.search_task("无数据").unwrap();
+        assert!(search_none_res.is_empty());
+
+        let search_ignorecase_res = services.search_task("AB").unwrap();
+        assert_eq!(search_ignorecase_res.len(), 1);
+
+        let search_ignorecase_res = services.search_task("def").unwrap();
+        assert_eq!(search_ignorecase_res.len(), 1);
 
         tests::cleanup(&services.store);
     }

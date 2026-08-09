@@ -471,9 +471,15 @@ pub struct TaskStats {
 输出：Result<Vec<Task>>
 流程：
   1. store.load() 加载所有任务
-  2. 过滤：title 或 description 中包含 keyword（忽略大小写）
-     - title.contains(keyword) || description.unwrap_or("").contains(keyword)
-  3. 返回匹配结果
+  2. 对 title 和 description 都执行大小写不敏感的 contains 匹配：
+     - title.to_lowercase().contains(keyword.to_lowercase())
+     - description.as_deref().map_or(false, |d| d.to_lowercase().contains(keyword.to_lowercase()))
+  3. 任一字段命中即保留
+  4. 返回匹配结果
+
+说明：
+  - 大小写不敏感通过双方 to_lowercase() 实现，非 locale 敏感（ASCII 场景足够）
+  - keyword 为空字符串时，"".contains("") 为 true，会返回所有任务（视为「列出全部」）
 ```
 
 ##### `get_stats()` — 统计信息（对应 PRD F6）
@@ -761,8 +767,19 @@ fn run() -> Result<()> {
             let deleted = service.delete_task(&id)?;
             println!("✓ 已删除任务：{} ({})", deleted.title, deleted.id);
         }
+        Commands::Search { keyword } => {
+            let res = service.search_task(&keyword)?;
+            if res.is_empty() {
+                println!("未找到匹配任务");
+            } else {
+                println!("✓ 搜索到 {} 条结果：", res.len());
+                for t in &res {
+                    println!("{t}");
+                }
+            }
+        }
         // 阶段二/三实现
-        Commands::Search { .. } | Commands::Stats | Commands::Export { .. } => {
+        Commands::Stats | Commands::Export { .. } => {
             anyhow::bail!("该命令将在后续阶段实现");
         }
     }
@@ -778,7 +795,7 @@ fn run() -> Result<()> {
 | `List` | `list_tasks(status, priority, tag)` | T1.6 已就绪 |
 | `Update` | `update_task(id, title, status, priority, desc, tags, due)` | T1.6 仅传入 cli 提供的字段，未提供的传 `None` |
 | `Delete` | `delete_task(id)` | T1.6 不实现交互确认（见 T3.1），`--force` 仅作为占位 |
-| `Search` | （stub）`anyhow::bail!("未实现")` | T2.2 实现 |
+| `Search` | `search_task(keyword)` | T2.2 已实现：大小写不敏感，命中 title 或 description |
 | `Stats` | （stub）`anyhow::bail!("未实现")` | T2.4 实现 |
 | `Export` | （stub）`anyhow::bail!("未实现")` | T3.2 实现 |
 
