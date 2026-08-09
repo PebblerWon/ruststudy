@@ -23,19 +23,18 @@ impl fmt::Display for Task {
         Some(d)=>{
           write!(
             f,
-            "[{}] {} ({}) - {}",
-            self.priority,self.title,self.status,self.due_date.unwrap().format("%Y-%m-%d")
+            "({})[{}] {} ({}) - {}",
+            &self.id[..8],self.priority,self.title,self.status,self.due_date.unwrap().format("%Y-%m-%d")
           )
         },
         _=>{
           write!(
             f,
-            "[{}] {} ({})",
-            self.priority,self.title,self.status
+            "({})[{}] {} ({})",
+            &self.id[..8],self.priority,self.title,self.status
           )
         }
     }
-    
   }
 }
 

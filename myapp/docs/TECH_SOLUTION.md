@@ -696,6 +696,158 @@ pub enum TaskError {
 }
 ```
 
+### 4.7 入口层与端到端串联（`main.rs` —— 对应 DEV_PLAN T1.6）
+
+#### 入口职责
+
+`main.rs` 是唯一串联所有模块的入口，但职责极薄，只做三件事：
+
+1. 调用 `Cli::parse()` 解析命令行参数
+2. 构造 `TaskService::new()?` 拿到业务层实例
+3. 将 `Commands` 子命令 dispatch 到 service 对应方法并打印结果
+
+不做业务校验、不做 IO、不做格式化（格式化下沉到后续 `display.rs`）。
+
+#### 推荐结构
+
+```rust
+use anyhow::{Context, Result};
+use clap::Parser;
+use crate::{
+    cli::{Cli, Commands},
+    service::TaskService,
+};
+
+fn main() {
+    if let Err(e) = run() {
+        eprintln!("✗ 错误：{e:#}");
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<()> {
+    let cli = Cli::parse();
+    let service = TaskService::new().context("初始化任务服务失败")?;
+
+    match cli.command {
+        Commands::Add { title, description, priority, tag, due } => {
+            let tags: Vec<&str> = tag.iter().map(String::as_str).collect();
+            let task = service.add_task(&title, description.as_deref(), Some(priority), tags, due.as_deref())?;
+            println!("✓ 任务创建成功：{}", task);
+        }
+        Commands::List { status, priority, tag } => {
+            let tasks = service.list_tasks(status, priority, tag.as_deref())?;
+            if tasks.is_empty() {
+                println!("暂无任务");
+            } else {
+                for t in &tasks {
+                    println!("{}", t);
+                }
+            }
+        }
+        Commands::Update { id, title, status, priority } => {
+            let task = service.update_task(
+                &id,
+                title.as_deref(),
+                status,
+                priority,
+                None,  // desc
+                None,  // tags
+                None,  // due
+            )?;
+            println!("✓ 任务已更新：{}", task);
+        }
+        Commands::Delete { id, force: _ } => {
+            let deleted = service.delete_task(&id)?;
+            println!("✓ 已删除任务：{} ({})", deleted.title, deleted.id);
+        }
+        // 阶段二/三实现
+        Commands::Search { .. } | Commands::Stats | Commands::Export { .. } => {
+            anyhow::bail!("该命令将在后续阶段实现");
+        }
+    }
+    Ok(())
+}
+```
+
+#### Dispatch 映射表
+
+| 子命令 | service 方法 | 备注 |
+|--------|-------------|------|
+| `Add` | `add_task(title, desc, priority, tags, due)` | T1.6 已就绪 |
+| `List` | `list_tasks(status, priority, tag)` | T1.6 已就绪 |
+| `Update` | `update_task(id, title, status, priority, desc, tags, due)` | T1.6 仅传入 cli 提供的字段，未提供的传 `None` |
+| `Delete` | `delete_task(id)` | T1.6 不实现交互确认（见 T3.1），`--force` 仅作为占位 |
+| `Search` | （stub）`anyhow::bail!("未实现")` | T2.2 实现 |
+| `Stats` | （stub）`anyhow::bail!("未实现")` | T2.4 实现 |
+| `Export` | （stub）`anyhow::bail!("未实现")` | T3.2 实现 |
+
+#### 输出规范（T1.6 阶段，暂不使用 `display.rs`）
+
+| 场景 | 输出 | 通道 |
+|------|------|------|
+| 单条任务操作成功 | `✓ <消息>：<Task Display>` | stdout |
+| `list` 有结果 | 每行一个 `Task Display` | stdout |
+| `list` 无结果 | `暂无任务` | stdout |
+| 业务错误 | `✗ 错误：<TaskError 中文消息>` | stderr |
+| 系统错误 | `✗ 错误：<anyhow chain>` | stderr |
+
+前缀约定：
+- 成功：`✓ `（U+2713 + 半角空格）
+- 错误：`✗ `（U+2717 + 半角空格）+ `错误：` 文字
+
+> **不做的事（明确推迟）**
+> - 不引入 `comfy-table` 渲染 → 推迟到 T2.3
+> - 不引入 `colored` 上色 → 推迟到 T2.3
+> - 不实现 `Delete` 的交互确认 → T3.1
+> - 不使用 `display.rs` 模块 → 当前仅依赖 `Task` 的 `Display`，等 T2.3 一并抽出
+
+#### 错误处理收敛
+
+- 顶层统一格式：`fn run() -> anyhow::Result<()>`，`main` 只负责 `if let Err` 打印 + `exit(1)`
+- 业务错误经由 `TaskError`（`thiserror`）产生，自动通过 `#[from]` 转为 `anyhow::Error`
+- 退出码：成功 `0`；任何错误路径 `1`（后续可细分，但不强制）
+- `TaskError` 当前已覆盖：
+  - `NotFound(id)` — `update`/`delete` 找不到
+  - `AmbiguousId(id)` — 前缀匹配命中多条
+  - `EmptyTitle` / `TitleTooLong` — `add`/`update` 标题校验
+  - `InvalidDate` — `due` 解析失败
+  - `StoreLoadError(io)` / `ParseError(json)` — 存储层兜底
+- 现阶段允许的 `.unwrap()`：
+  - `Uuid::new_v4()`（系统调用，不可能失败）
+  - `Cli::parse()` 之外的 `unwrap` 一律禁止；如有，标记 TODO 等 T3.3 清理
+
+#### 手动验收脚本
+
+与 DEV_PLAN § 阶段一验收 对齐，并补充异常路径：
+
+```bash
+# 正常路径
+cargo run -- add "学习Rust" -p high
+cargo run -- list
+cargo run -- update <id前缀> --status done
+cargo run -- delete <id前缀>
+cargo run -- list                 # 确认删除生效
+
+# 异常路径（期待非 0 退出 + 中文提示）
+cargo run -- add ""               # ✗ 错误：标题不能为空
+cargo run -- update xx --status done   # ✗ 错误：任务不存在：xx
+# 日期格式错误：expect ✗ 错误：日期格式错误，请使用 YYYY-MM-DD 格式
+cargo run -- add "测试日期" --due 2099/01/01
+# 日期合法（对照）：expect ✓ 任务创建成功
+cargo run -- add "测试日期" --due 2099-01-01
+```
+
+> `<id前缀>` 取自 `list` 输出中 UUID 前 8 位。
+
+#### 完成判定（DoD）
+
+- 上述 8 条命令全部按预期输出，**无 panic**
+- `~/.taskflow/data.json` 内容随命令正确变化（`cat` 可验证）
+- 错误路径输出中文友好提示且退出码非 0
+- `cargo build` 无 warning（建议项）
+- 单元测试与既有 service/store/models 测试不回归：`cargo test` 全绿
+
 ---
 
 ## 5. 关键技术点说明
