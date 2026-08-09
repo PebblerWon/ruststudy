@@ -92,13 +92,14 @@ taskflow delete <id>
   - **产出：** `taskflow search <keyword>` 可用
   - **实现要点：** 大小写不敏感（双方 `to_lowercase()`），title/description 任一命中即返回；空 keyword 返回所有任务
 
-- [ ] **T2.3 表格与彩色输出**
+- [x] **T2.3 表格与彩色输出** ✅
   - 使用 `comfy-table` 渲染表格
   - 使用 `colored` 添加颜色：
     - 优先级颜色：High=红，Medium=黄，Low=绿
-    - 状态颜色：Done=绿，InProgress=蓝，Todo=灰
+    - 状态颜色：Done=绿（删除线），InProgress=蓝，Todo=灰
   - 成功/错误/警告信息带颜色
   - **产出：** 美观的彩色表格输出
+  - **实现要点：** `display.rs` 提供 `print_task_table` + `print_success`/`print_error`/`print_info`/`print_warning`，main.rs 已接入；`print_warning` 当前无 caller，留给 T3.4
 
 - [ ] **T2.4 统计面板**
   - 新增 `stats` 子命令
@@ -184,7 +185,7 @@ taskflow --help               # 帮助信息完整
 | T1.6 | ✅ 已完成 | 2026-08-09 | 2026-08-09 | main.rs dispatch：Add/List/Update/Delete/Search |
 | T2.1 | ⬜ 待开始 |            |            |                                |
 | T2.2 | ✅ 已完成 | 2026-08-09 | 2026-08-09 | search_task：大小写不敏感 + 单元测试 |
-| T2.3 | ⬜ 待开始 |            |            |                                |
+| T2.3 | ✅ 已完成 | 2026-08-09 | 2026-08-09 | display.rs + main.rs 接入，print_warning 待 T3.4 |
 | T2.4 | ⬜ 待开始 |            |            |                                |
 | T3.1 | ⬜ 待开始 |            |            |                                |
 | T3.2 | ⬜ 待开始 |            |            |                                |

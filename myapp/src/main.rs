@@ -1,4 +1,5 @@
 mod cli;
+mod display;
 mod error;
 mod models;
 mod service;
@@ -6,6 +7,7 @@ mod store;
 
 use crate::{
     cli::{Cli, Commands},
+    display::{print_error, print_info, print_success, print_task_table},
     service::TaskService,
 };
 use anyhow::{Context, Result};
@@ -13,7 +15,7 @@ use clap::Parser;
 
 fn main() {
     if let Err(e) = run() {
-        eprintln!("✗ 错误：{e:#}");
+        print_error(&format!("{e:#}"));
         std::process::exit(1)
     }
 }
@@ -33,7 +35,7 @@ fn run() -> Result<()> {
             let tags: Vec<&str> = tag.iter().map(String::as_str).collect();
             let desc = description.as_deref();
             let task = service.add_task(&title, desc, Some(priority), tags, due.as_deref())?;
-            println!("✓ 任务创建成功：{}", task);
+            print_success(&format!("任务创建成功：{}", task));
         }
 
         Commands::List {
@@ -44,11 +46,9 @@ fn run() -> Result<()> {
             let tasks = service.list_tasks(status, priority, tag.as_deref())?;
 
             if tasks.is_empty() {
-                println!("暂无任务")
+                print_info("暂无任务");
             } else {
-                for i in &tasks {
-                    println!("{i}");
-                }
+                print_task_table(&tasks);
             }
         }
         Commands::Update {
@@ -59,22 +59,21 @@ fn run() -> Result<()> {
         } => {
             let task =
                 service.update_task(&id, title.as_deref(), status, priority, None, None, None)?;
-            println!("✓ 任务已更新：{}", task);
+            print_success(&format!("任务已更新：{}", task));
         }
+        // TODO: T3.1 删除前确认 + 读取 force 参数
         Commands::Delete { id, force: _ } => {
             let deleted = service.delete_task(&id)?;
 
-            println!("✓ 已删除任务：{} ({})", deleted.title, deleted.id);
+            print_success(&format!("已删除任务：{} ({})", deleted.title, deleted.id));
         }
         Commands::Search { keyword } => {
             let res = service.search_task(keyword.as_str())?;
             if res.is_empty() {
-                println!("未找到匹配任务")
+                print_info("未找到匹配任务");
             } else {
-                println!("✓ 搜索到 {} 条结果：", res.len());
-                for i in &res {
-                    println!("{i}");
-                }
+                println!("搜索到 {} 条结果：", res.len());
+                print_task_table(&res);
             }
         }
         // 阶段二/三实现

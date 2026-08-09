@@ -648,32 +648,131 @@ pub enum Commands {
 
 ```rust
 use colored::Colorize;
-use comfy_table::Table;
+use comfy_table::{
+    presets::UTF8_FULL, Cell, CellAlignment, ContentArrangement, Table,
+};
 
 pub fn print_task_table(tasks: &[Task]) {
     let mut table = Table::new();
-    table.set_header(vec!["ID", "标题", "状态", "优先级", "标签", "截止日期"]);
+
+    // 1. 加载 Unicode 全边框 preset（横线/竖线/交叉点）
+    // 2. ContentArrangement::Dynamic 让表格按内容 + 终端宽度自动调整列宽
+    table
+        .load_preset(UTF8_FULL)
+        .set_content_arrangement(ContentArrangement::Dynamic)
+        .set_header(vec!["ID", "标题", "状态", "优先级", "标签", "截止日期"]);
+
     for task in tasks {
+        let due_str = task.due_date.map_or("--".to_string(), |d| d.to_string());
+
+        // 必须用 Cell::new 包裹！原因见下方"对齐约束"
+        // - 自动忽略 ANSI 颜色转义码，按可见字符算列宽
+        // - 配合 column_mut() 可单独设置该列对齐方式
         table.add_row(vec![
-            &task.id[..8],  // 只显示 UUID 前 8 位
-            &task.title,
-            format_status(&task.status),  // 带颜色
-            format_priority(&task.priority),  // 带颜色
-            &task.tags.join(", "),
-            &task.due_date.map_or("-".into(), |d| d.to_string()),
+            Cell::new(&task.id[..task.id.len().min(8)]),    // UUID 安全截断：min(8, len)
+            Cell::new(&task.title),
+            Cell::new(format_status(&task.status)),          // 带 ANSI 转义码，由 Cell 自动处理
+            Cell::new(format_priority(&task.priority)),
+            Cell::new(&task.tags.join(",")),
+            Cell::new(&due_str),
         ]);
     }
+
+    // 按列设置对齐方式（索引对应 set_header 的列顺序）
+    let _ = table.column_mut(1).map(|c| c.set_cell_alignment(CellAlignment::Left));   // 标题
+    let _ = table.column_mut(2).map(|c| c.set_cell_alignment(CellAlignment::Center)); // 状态
+    let _ = table.column_mut(3).map(|c| c.set_cell_alignment(CellAlignment::Center)); // 优先级
+    let _ = table.column_mut(4).map(|c| c.set_cell_alignment(CellAlignment::Left));   // 标签
+    let _ = table.column_mut(5).map(|c| c.set_cell_alignment(CellAlignment::Center)); // 截止日期
+
     println!("{table}");
 }
 
-pub fn print_success(msg: &str) {
-    println!("{}", msg.green());
+pub fn format_status(status: &Status) -> String {
+    match status {
+        Status::Done => "已完成".green().strikethrough(),       // PRD F7：Done=绿色删除线
+        Status::InProgress => "进行中".blue(),
+        Status::Todo => "未完成".bright_black(),
+    }
+    .to_string()
 }
 
+pub fn format_priority(priority: &Priority) -> String {
+    match priority {
+        Priority::High => "高".red(),
+        Priority::Medium => "中".yellow(),
+        Priority::Low => "低".green(),
+    }
+    .to_string()
+}
+
+/// 成功消息：自动加 ✓ 前缀 + 绿色
+pub fn print_success(msg: &str) {
+    println!("✓ {}", msg.green());
+}
+
+/// 错误消息：自动加 ✗ 前缀 + 红色 + 走 stderr
 pub fn print_error(msg: &str) {
-    eprintln!("{}", msg.red());
+    eprintln!("✗ 错误：{}", msg.red());
+}
+
+/// 普通信息（无前缀无颜色）：用于「暂无任务」「未找到匹配任务」等中性状态
+pub fn print_info(msg: &str) {
+    println!("{}", msg);
+}
+
+/// 警告信息：仅黄色着色，无前缀（T3.4 输入校验时启用）
+/// 注意：与 print_success/print_error 不同，警告前缀 ⚠ 由调用方自行拼接，
+/// 因为不同场景的警告前缀可能不同（⚠ / ! / [WARN] 等）。
+pub fn print_warning(msg: &str) {
+    println!("{}", msg.yellow());
 }
 ```
+
+#### 设计与契约
+
+| 函数 | 通道 | 前缀 | 颜色 | 调用方职责 |
+|------|------|------|------|----------|
+| `print_success` | stdout | `✓ ` | 绿 | 传"主体内容"，前缀/颜色由 display 自动加 |
+| `print_error` | stderr | `✗ 错误：` | 红 | 同上 |
+| `print_info` | stdout | 无 | 无 | 同上 |
+| `print_warning` | stdout | 无 | 黄 | 调用方控制前缀（仅着色） |
+| `print_task_table` | stdout | 无 | 表格列自带 | 传 `&[Task]` |
+
+#### 对齐约束
+
+##### 颜色规则（严格遵循 [PRD F7](docs/PRD.md)）
+
+- 状态 Done = **绿色删除线**（`.green().strikethrough()`）
+- 状态 InProgress = 蓝色（`.blue()`）
+- 状态 Todo = 灰色（`.bright_black()`）
+- 优先级 High = 红、Medium = 黄、Low = 绿
+
+##### 表格渲染约束
+
+- **必须用 `Cell::new()` 包裹每列内容**
+  - 原因：`format_status` / `format_priority` 返回的字符串含 ANSI 颜色转义码（`\x1b[...m`），`comfy_table` 默认把转义码也算成字符宽度，导致彩色列被算得超宽
+  - `Cell::new()` 内部会**自动忽略 ANSI 转义码**，按可见字符算宽
+- **必须用 `load_preset(UTF8_FULL)`** 加载 Unicode 全边框，否则表格无横线/竖线
+- **必须用 `set_content_arrangement(ContentArrangement::Dynamic)`** 让表格按内容自适应列宽
+- **ID 必须用 `min(8)` 防 panic**：mock 测试数据 id 可能很短（`"1"`、`"2"`），裸切片 `&id[..8]` 会 panic
+- **CJK 字符宽度**：当前默认靠 `Dynamic` 自适应；若发现中文列依然错位（不同终端字体宽度不同），可加 `unicode-width` crate 用 `UnicodeWidthStr` 精确计算
+
+##### 对齐方式（column_mut + CellAlignment）
+
+| 列 | 索引 | 对齐 |
+|----|------|------|
+| ID | 0 | 默认（按内容） |
+| 标题 | 1 | Left |
+| 状态 | 2 | Center |
+| 优先级 | 3 | Center |
+| 标签 | 4 | Left |
+| 截止日期 | 5 | Center |
+
+##### `print_warning` 当前无 caller
+
+- **T3.4 输入校验完善时启用**（如"标签超过 10 个"等警告）
+- 注意：与 `print_success`/`print_error` 不同，警告前缀由调用方按需拼接
 
 ### 4.6 错误处理 (`error.rs`)
 
@@ -799,25 +898,36 @@ fn run() -> Result<()> {
 | `Stats` | （stub）`anyhow::bail!("未实现")` | T2.4 实现 |
 | `Export` | （stub）`anyhow::bail!("未实现")` | T3.2 实现 |
 
-#### 输出规范（T1.6 阶段，暂不使用 `display.rs`）
+#### 输出规范
 
-| 场景 | 输出 | 通道 |
+`main.rs` 通过 `display::*` 函数统一所有输出，前缀/颜色/通道由 display 内部负责，main 只传"主体内容"。
+
+| 场景 | 调用函数 | 实际输出 | 通道 |
+|------|---------|---------|------|
+| 单条任务操作成功（Add/Update/Delete） | `print_success(&format!(...))` | `✓ <消息>：<Task Display>` | stdout |
+| `list` 有结果 | `print_task_table(&tasks)` | 表格 | stdout |
+| `list` 无结果 | `print_info("暂无任务")` | `暂无任务` | stdout |
+| `search` 命中 | `println!("搜索到 N 条结果：")` + `print_task_table(&res)` | 计数 + 表格 | stdout |
+| `search` 无结果 | `print_info("未找到匹配任务")` | `未找到匹配任务` | stdout |
+| 业务错误（TaskError） | 经 `?` 上抛到 main → `print_error(&format!("{e:#}"))` | `✗ 错误：<anyhow chain>` | stderr |
+| 系统错误（io/json） | 同上 | 同上 | stderr |
+| 输入校验警告（T3.4 启用） | `print_warning(&format!("⚠ {msg}"))` | `⚠ <消息>` | stdout |
+
+前缀/颜色约定（display 内部硬编码）：
+
+| 类型 | 前缀 | 颜色 |
 |------|------|------|
-| 单条任务操作成功 | `✓ <消息>：<Task Display>` | stdout |
-| `list` 有结果 | 每行一个 `Task Display` | stdout |
-| `list` 无结果 | `暂无任务` | stdout |
-| 业务错误 | `✗ 错误：<TaskError 中文消息>` | stderr |
-| 系统错误 | `✗ 错误：<anyhow chain>` | stderr |
+| 成功 | `✓ `（U+2713 + 半角空格） | 绿 |
+| 错误 | `✗ 错误：`（U+2717 + 半角空格） | 红 |
+| 信息 | 无 | 无 |
+| 警告 | `⚠ `（U+26A0 + 半角空格） | 黄 |
 
-前缀约定：
-- 成功：`✓ `（U+2713 + 半角空格）
-- 错误：`✗ `（U+2717 + 半角空格）+ `错误：` 文字
-
-> **不做的事（明确推迟）**
-> - 不引入 `comfy-table` 渲染 → 推迟到 T2.3
-> - 不引入 `colored` 上色 → 推迟到 T2.3
+> **历史推迟项（已落地）**
+> - ~~不引入 `comfy-table` 渲染~~ → T2.3 已接入
+> - ~~不引入 `colored` 上色~~ → T2.3 已接入
+> - ~~不使用 `display.rs` 模块~~ → 已接入 main.rs
 > - 不实现 `Delete` 的交互确认 → T3.1
-> - 不使用 `display.rs` 模块 → 当前仅依赖 `Task` 的 `Display`，等 T2.3 一并抽出
+> - `print_warning` 无 caller → T3.4 输入校验时启用
 
 #### 错误处理收敛
 
