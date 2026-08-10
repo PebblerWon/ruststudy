@@ -332,6 +332,7 @@ pub struct TaskService {
 #### TaskStats 统计结构体
 
 ```rust
+#[derive(Default, Debug)]
 pub struct TaskStats {
     pub total: usize,
     pub todo: usize,
@@ -344,6 +345,11 @@ pub struct TaskStats {
     pub completion_rate: f64,  // 完成率 = done / total
 }
 ```
+
+**设计要点：**
+
+- `#[derive(Default)]`：所有字段为 `usize`/`f64`，默认值全为 0/0.0，支持 `..Default::default()` 初始化未显式赋值的字段
+- `#[derive(Debug)]`：方便调试（`dbg!(&stats)`）和测试断言失败时打印信息
 
 #### 方法清单
 
@@ -494,16 +500,35 @@ pub struct TaskStats {
 输出：Result<TaskStats>
 流程：
   1. store.load() 加载所有任务
-  2. 统计：
-     - total = tasks.len()
-     - todo = 计数 status == Todo
-     - in_progress = 计数 status == InProgress
-     - done = 计数 status == Done
-     - high/medium/low = 按 priority 计数
-     - overdue = 计数 due_date < Utc::now().date() 且 status != Done
-     - completion_rate = if total == 0 { 0.0 } else { done as f64 / total as f64 }
-  3. 返回 TaskStats
+  2. let today = Some(Utc::now().date_naive())  // 提到循环外，避免每次迭代重复系统调用
+  3. 单次遍历 tasks，对每个 task：
+     - match status → 累加 todo / in_progress / done
+     - match priority → 累加 high / medium / low
+     - 判定逾期：due_date.is_some() && due_date < today && status != Done
+       - is_some() 守卫是必须的：Rust 中 None < Some(x) 为 true，不加守卫会误判无截止日期的任务为逾期
+       - 用 date_naive() 而非已废弃的 date()，获取 NaiveDate 与 task.due_date（Option<NaiveDate>）同类型比较
+     - 逾期则 stats.overdue += 1
+  4. completion_rate = if total == 0 { 0.0 } else { done as f64 / total as f64 }
+  5. 返回 TaskStats
 ```
+
+**实现要点：**
+
+- 采用「单次遍历 for + match」方案（方案一），O(n) 时间，match 穷尽枚举防遗漏
+- `TaskStats { total, ..Default::default() }` 初始化，仅显式赋 total
+- `today` 变量提到循环外只取一次，避免 `Utc::now()` 重复系统调用
+- 除零保护：`total == 0` 时 `completion_rate = 0.0`
+
+**单元测试覆盖（`test_stats`）：**
+
+| 场景             | 数据                       | 期望 overdue | 验证点                         |
+| ---------------- | -------------------------- | ------------ | ------------------------------ |
+| 空列表           | 无任务                     | 0            | `total=0, completion_rate=0.0` |
+| 正向逾期         | 过期 due_date + InProgress | 1            | Todo + InProgress 均算逾期     |
+| 边界：今天到期   | due_date == today + Todo   | 0            | 严格 `<`，等于不算             |
+| 边界：无截止日期 | due_date = None + Todo     | 0            | `is_some()` 守卫生效           |
+| 边界：已完成     | 过期 due_date + Done       | 0            | `!= Done` 排除已完成           |
+| 边界：未来到期   | 未来 due_date + Todo       | 0            | 未到期不算                     |
 
 ##### `export_tasks()` — 导出数据（对应 PRD F8）
 
@@ -733,6 +758,61 @@ pub fn print_warning(msg: &str) {
 }
 ```
 
+#### 统计面板输出 (`print_stats`)
+
+```rust
+/// 渲染统计面板：概览行 + 状态分布表 + 优先级分布表 + 逾期提示
+pub fn print_stats(stats: &TaskStats) {
+    // 1. 概览行：总数 + 已完成率
+    let rate = format!("{:.1}%", stats.completion_rate * 100.0);
+    println!("总任务数：{}    已完成率：{}", stats.total, rate);
+
+    // 2. 状态分布表（列：状态 | 数量 | 占比）
+    let mut status_table = Table::new();
+    status_table
+        .load_preset(UTF8_FULL)
+        .set_content_arrangement(ContentArrangement::Dynamic)
+        .set_header(vec!["状态", "数量", "占比"]);
+    status_table.add_row(vec![
+        status_cell(&Status::Todo),
+        Cell::new(stats.todo.to_string()),
+        Cell::new(format_pct(stats.todo, stats.total)),
+    ]);
+    // ... InProgress、Done 同理
+    println!("{status_table}");
+
+    // 3. 优先级分布表（列：优先级 | 数量）
+    let mut prio_table = Table::new();
+    prio_table
+        .load_preset(UTF8_FULL)
+        .set_content_arrangement(ContentArrangement::Dynamic)
+        .set_header(vec!["优先级", "数量"]);
+    // ... High、Medium、Low 三行
+    println!("{prio_table}");
+
+    // 4. 逾期提示（仅在 overdue > 0 时输出）
+    if stats.overdue > 0 {
+        print_warning(&format!("逾期任务：{} 个", stats.overdue));
+    }
+}
+
+/// 计算占比字符串，total=0 时返回 "0.0%"
+fn format_pct(part: usize, total: usize) -> String {
+    if total == 0 {
+        "0.0%".to_string()
+    } else {
+        format!("{:.1}%", part as f64 / total as f64 * 100.0)
+    }
+}
+```
+
+**设计要点：**
+
+- 状态/优先级单元格复用 `status_cell()` / `priority_cell()`，颜色规则与 PRD F7 一致
+- 表格内颜色用 `comfy_table` 原生 `Cell` 样式 API，禁止 `colored`（原因见下方对齐约束）
+- 占比格式化统一走 `format_pct()` 辅助函数，防除零
+- 逾期提示复用 `print_warning`，前缀 `⚠` 由 `print_warning` 自带
+
 #### 设计与契约
 
 | 函数               | 通道   | 前缀       | 颜色       | 调用方职责                               |
@@ -814,6 +894,7 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use crate::{
     cli::{Cli, Commands},
+    display::{print_error, print_info, print_stats, print_success, print_task_table},
     service::TaskService,
 };
 
@@ -871,8 +952,12 @@ fn run() -> Result<()> {
                 }
             }
         }
-        // 阶段二/三实现
-        Commands::Stats | Commands::Export { .. } => {
+        Commands::Stats => {
+            let stats = service.get_stats()?;
+            print_stats(&stats);
+        }
+        // 阶段三实现
+        Commands::Export { .. } => {
             anyhow::bail!("该命令将在后续阶段实现");
         }
     }
@@ -889,7 +974,7 @@ fn run() -> Result<()> {
 | `Update` | `update_task(id, title, status, priority, desc, tags, due)` | T1.6 仅传入 cli 提供的字段，未提供的传 `None`        |
 | `Delete` | `delete_task(id)`                                           | T1.6 不实现交互确认（见 T3.1），`--force` 仅作为占位 |
 | `Search` | `search_task(keyword)`                                      | T2.2 已实现：大小写不敏感，命中 title 或 description |
-| `Stats`  | （stub）`anyhow::bail!("未实现")`                           | T2.4 实现                                            |
+| `Stats`  | `get_stats()`                                               | T2.4 已实现：TaskStats 统计 + print_stats 展示       |
 | `Export` | （stub）`anyhow::bail!("未实现")`                           | T3.2 实现                                            |
 
 #### 输出规范

@@ -101,8 +101,8 @@ taskflow delete <id>
   - **产出：** 美观的彩色表格输出
   - **实现要点：** `display.rs` 提供 `print_task_table` + `print_success`/`print_error`/`print_info`/`print_warning`，main.rs 已接入；表格内颜色改用 `comfy_table` 原生 `Cell` 样式 API 以避免 ANSI 转义码导致列宽错位；`print_warning` 当前无 caller，留给 T3.4
 
-- [ ] **T2.4 统计面板**
-  - 新增 `stats` 子命令
+- [x] **T2.4 统计面板** ✅
+  - 新增 `stats` 子命令（CLI 已定义 `Commands::Stats`）
   - 实现统计计算逻辑：
     - 总数、各状态数量及占比
     - 各优先级数量
@@ -110,6 +110,8 @@ taskflow delete <id>
     - 逾期任务数
   - 格式化展示统计结果
   - **产出：** `taskflow stats` 可用
+  - **技术方案：** 见 [TECH_SOLUTION.md § 4.3 get_stats()](docs/TECH_SOLUTION.md) 及 § 4.5 print_stats()
+  - **实现要点：** `service.rs` 新增 `TaskStats` + `get_stats()`（单次遍历计数，`date_naive()` 判逾期，防除零）；`display.rs` 新增 `print_stats()`（概览行 + 状态/优先级分布表 + 逾期警告，复用 `status_cell`/`priority_cell`）；`main.rs` 接入 Stats dispatch；单元测试覆盖空列表、正常统计、逾期边界（今天/过期/无截止日期/已完成）
 
 **阶段二验收：**
 
@@ -186,7 +188,7 @@ taskflow --help               # 帮助信息完整
 | T2.1 | ⬜ 待开始 |            |            |                                                  |
 | T2.2 | ✅ 已完成 | 2026-08-09 | 2026-08-09 | search_task：大小写不敏感 + 单元测试             |
 | T2.3 | ✅ 已完成 | 2026-08-09 | 2026-08-09 | display.rs + main.rs 接入，print_warning 待 T3.4 |
-| T2.4 | ⬜ 待开始 |            |            |                                                  |
+| T2.4 | ✅ 已完成 | 2026-08-10 | 2026-08-10 | TaskStats + get_stats + print_stats + 边界测试   |
 | T3.1 | ⬜ 待开始 |            |            |                                                  |
 | T3.2 | ⬜ 待开始 |            |            |                                                  |
 | T3.3 | ⬜ 待开始 |            |            |                                                  |

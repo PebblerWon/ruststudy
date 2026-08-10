@@ -1,7 +1,7 @@
 use colored::Colorize;
 use comfy_table::{presets::UTF8_FULL, Attribute, Cell, Color, ContentArrangement, Table};
 
-use crate::models::{Priority, Status, Task};
+use crate::models::{Priority, Status, Task, TaskStats};
 
 pub fn print_task_table(tasks: &[Task]) {
     let mut table = Table::new();
@@ -29,11 +29,63 @@ pub fn print_task_table(tasks: &[Task]) {
     println!("{table}");
 }
 
+pub fn print_stats(stats: &TaskStats) {
+    let rate = format!("{:.1}%", stats.completion_rate * 100.0);
+    let total = stats.total;
+    println!("总任务数：{}    已完成率：{}", total, rate);
+    let mut status_table = Table::new();
+
+    status_table
+        .load_preset(UTF8_FULL) // 1. 加载 Unicode 全边框
+        .set_content_arrangement(ContentArrangement::Dynamic) // 2. 自适应填满终端
+        .set_header(vec!["状态", "数量", "占比"]);
+
+    status_table.add_row(vec![
+        status_cell(&Status::Todo),
+        Cell::new(stats.todo),
+        Cell::new(format_pct(stats.todo, total)),
+    ]);
+    status_table.add_row(vec![
+        status_cell(&Status::InProgress),
+        Cell::new(stats.in_progress),
+        Cell::new(format_pct(stats.in_progress, total)),
+    ]);
+    status_table.add_row(vec![
+        status_cell(&Status::Done),
+        Cell::new(stats.done),
+        Cell::new(format_pct(stats.done, total)),
+    ]);
+    println!("{status_table}");
+    let mut prio_table = Table::new();
+    prio_table
+        .load_preset(UTF8_FULL)
+        .set_content_arrangement(ContentArrangement::Dynamic)
+        .set_header(vec!["优先级", "数量"]);
+    prio_table.add_row(vec![priority_cell(&Priority::High), Cell::new(stats.high)]);
+    prio_table.add_row(vec![
+        priority_cell(&Priority::Medium),
+        Cell::new(stats.medium),
+    ]);
+    prio_table.add_row(vec![priority_cell(&Priority::Low), Cell::new(stats.low)]);
+    println!("{prio_table}");
+
+    if stats.overdue > 0 {
+        print_warning(&format!("逾期任务：{} 个", stats.overdue));
+    }
+}
+
+fn format_pct(part: usize, total: usize) -> String {
+    if total == 0 {
+        "0.0%".to_string()
+    } else {
+        format!("{:.1}%", part as f64 / total as f64 * 100.0)
+    }
+}
 fn status_cell(status: &Status) -> Cell {
     match status {
-        Status::Done => {
-            Cell::new("已完成").fg(Color::Green).add_attribute(Attribute::CrossedOut)
-        }
+        Status::Done => Cell::new("已完成")
+            .fg(Color::Green)
+            .add_attribute(Attribute::CrossedOut),
         Status::InProgress => Cell::new("进行中").fg(Color::Blue),
         Status::Todo => Cell::new("未完成").fg(Color::DarkGrey),
     }

@@ -1,5 +1,5 @@
-mod task;
 mod enums;
+mod task;
 
-pub use task::Task;
-pub use enums::{Status,Priority};
+pub use enums::{Priority, Status};
+pub use task::{Task, TaskStats};

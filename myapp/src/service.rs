@@ -1,6 +1,6 @@
 use crate::{
     error::TaskError,
-    models::{Priority, Status, Task},
+    models::{Priority, Status, Task, TaskStats},
     store::{JsonFileStore, Store},
 };
 use anyhow::{Ok, Result};
@@ -188,6 +188,46 @@ impl TaskService {
             .collect();
         Ok(res)
     }
+
+    pub fn get_stats(&self) -> Result<TaskStats> {
+        let tasks = self.store.load()?;
+
+        let total = tasks.len();
+        let mut stats = TaskStats {
+            total,
+            ..Default::default()
+        };
+
+        let today = Some(Utc::now().date_naive());
+        for task in &tasks {
+            match task.status {
+                Status::Done => stats.done += 1,
+                Status::InProgress => stats.in_progress += 1,
+                Status::Todo => stats.todo += 1,
+            }
+            match task.priority {
+                Priority::High => stats.high += 1,
+                Priority::Medium => stats.medium += 1,
+                Priority::Low => stats.low += 1,
+            }
+
+            let overdue =
+                task.due_date.is_some() && task.due_date < today && task.status != Status::Done;
+
+            if overdue {
+                stats.overdue += 1;
+            }
+        }
+
+        let completion_rate = if total == 0 {
+            0.0
+        } else {
+            stats.done as f64 / total as f64
+        };
+        stats.completion_rate = completion_rate;
+
+        Ok(stats)
+    }
 }
 
 #[cfg(test)]
@@ -200,7 +240,7 @@ mod tests {
 
     use super::*;
     use crate::{service, store::tests};
-    use chrono::{NaiveDate, TimeZone, Utc};
+    use chrono::{Duration, NaiveDate, TimeZone, Utc};
 
     fn create_temp_services(test_name: &str) -> Result<TaskService> {
         let store = tests::temp_store(test_name);
@@ -372,6 +412,116 @@ mod tests {
 
         let search_ignorecase_res = services.search_task("def").unwrap();
         assert_eq!(search_ignorecase_res.len(), 1);
+
+        tests::cleanup(&services.store);
+    }
+
+    #[test]
+    fn test_stats() {
+        let services = create_temp_services("test_stats").unwrap();
+
+        let stats1 = services.get_stats().unwrap();
+        assert_eq!(stats1.completion_rate, 0.0);
+
+        let today = Utc::now().date_naive();
+        let todaystr = today.format("%Y-%m-%d").to_string();
+        let yesterday = today - Duration::days(1);
+        let yesterdaystr = yesterday.format("%Y-%m-%d").to_string();
+        let tomorrow = today + Duration::days(1);
+        let tomorrowstr = tomorrow.format("%Y-%m-%d").to_string();
+
+        services
+            .add_task("1", None, Some(Priority::High), vec![], None)
+            .unwrap();
+        services
+            .add_task("2", None, Some(Priority::Medium), vec![], None)
+            .unwrap();
+        let three = services
+            .add_task("3", None, Some(Priority::Low), vec![], None)
+            .unwrap();
+        let four = services
+            .add_task("4", None, Some(Priority::Low), vec![], None)
+            .unwrap();
+
+        services
+            .update_task(
+                &three.id,
+                None,
+                Some(Status::InProgress),
+                None,
+                None,
+                None,
+                Some(&yesterdaystr),
+            )
+            .unwrap();
+        services
+            .update_task(&four.id, None, Some(Status::Done), None, None, None, None)
+            .unwrap();
+
+        let stats = services.get_stats().unwrap();
+        let tasks = services.store.load().unwrap();
+
+        assert_eq!(stats.total, tasks.len());
+        assert_eq!(stats.todo, 2);
+        assert_eq!(stats.in_progress, 1);
+        assert_eq!(stats.done, 1);
+        assert_eq!(stats.high, 1);
+        assert_eq!(stats.medium, 1);
+        assert_eq!(stats.low, 2);
+        assert_eq!(stats.overdue, 1);
+        assert_eq!(stats.completion_rate, 1.0 / 4.0);
+
+        services
+            .update_task(
+                &three.id,
+                None,
+                Some(Status::Todo),
+                None,
+                None,
+                None,
+                Some(&todaystr),
+            )
+            .unwrap();
+
+        let stats = services.get_stats().unwrap();
+        assert_eq!(stats.overdue, 0);
+
+        services
+            .update_task(&three.id, None, Some(Status::Todo), None, None, None, None)
+            .unwrap();
+
+        let stats = services.get_stats().unwrap();
+        assert_eq!(stats.overdue, 0);
+
+        services
+            .update_task(
+                &three.id,
+                None,
+                Some(Status::Done),
+                None,
+                None,
+                None,
+                Some(&yesterdaystr),
+            )
+            .unwrap();
+
+        let stats = services.get_stats().unwrap();
+        assert_eq!(stats.overdue, 0);
+
+        services
+            .update_task(
+                &three.id,
+                None,
+                Some(Status::Todo),
+                None,
+                None,
+                None,
+                Some(&tomorrowstr),
+            )
+            .unwrap();
+
+        let stats = services.get_stats().unwrap();
+        assert_eq!(stats.overdue, 0);
 
         tests::cleanup(&services.store);
     }

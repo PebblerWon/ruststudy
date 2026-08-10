@@ -7,7 +7,7 @@ mod store;
 
 use crate::{
     cli::{Cli, Commands},
-    display::{print_error, print_info, print_success, print_task_table},
+    display::{print_error, print_info, print_stats, print_success, print_task_table},
     service::TaskService,
 };
 use anyhow::{Context, Result};
@@ -76,8 +76,12 @@ fn run() -> Result<()> {
                 print_task_table(&res);
             }
         }
+        Commands::Stats => {
+            let task_stats = service.get_stats()?;
+            print_stats(&task_stats);
+        }
         // 阶段二/三实现
-        Commands::Stats | Commands::Export { .. } => {
+        Commands::Export { .. } => {
             anyhow::bail!("该命令将在后续阶段实现");
         }
     }
