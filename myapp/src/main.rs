@@ -7,7 +7,9 @@ mod store;
 
 use crate::{
     cli::{Cli, Commands},
-    display::{print_error, print_info, print_stats, print_success, print_task_table},
+    display::{
+        print_error, print_info, print_stats, print_success, print_task_table, print_warning,
+    },
     service::TaskService,
 };
 use anyhow::{Context, Result};
@@ -61,10 +63,25 @@ fn run() -> Result<()> {
                 service.update_task(&id, title.as_deref(), status, priority, None, None, None)?;
             print_success(&format!("任务已更新：{}", task));
         }
-        // TODO: T3.1 删除前确认 + 读取 force 参数
-        Commands::Delete { id, force: _ } => {
-            let deleted = service.delete_task(&id)?;
+        Commands::Delete { id, force } => {
+            if !force {
+                let task = service.get_task_by_id(&id)?;
+                print_warning(&format!(
+                    "确认删除任务 \"{}\" ({})?(y/n)",
+                    task.title,
+                    &task.id[..task.id.len().min(8)]
+                ));
 
+                let mut input = String::new();
+
+                std::io::stdin().read_line(&mut input)?;
+
+                if input.trim().to_lowercase() != "y" {
+                    print_info("已取消删除");
+                    return Ok(());
+                }
+            }
+            let deleted = service.delete_task(&id)?;
             print_success(&format!("已删除任务：{} ({})", deleted.title, deleted.id));
         }
         Commands::Search { keyword } => {

@@ -60,6 +60,11 @@ impl TaskService {
             return Ok(p.unwrap());
         }
     }
+    pub fn get_task_by_id(&self, id: &str) -> Result<Task> {
+        let tasks = self.store.load()?;
+        let i = Self::find_task_by_id(&tasks, id)?;
+        Ok(tasks[i].clone())
+    }
     pub fn add_task(
         &self,
         title: &str,
