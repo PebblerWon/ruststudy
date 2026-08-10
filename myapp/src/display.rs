@@ -1,5 +1,5 @@
 use colored::Colorize;
-use comfy_table::{presets::UTF8_FULL, Cell, CellAlignment, ContentArrangement, Table};
+use comfy_table::{presets::UTF8_FULL, Attribute, Cell, Color, ContentArrangement, Table};
 
 use crate::models::{Priority, Status, Task};
 
@@ -18,35 +18,33 @@ pub fn print_task_table(tasks: &[Task]) {
             task.tags.join(",")
         };
         table.add_row(vec![
-            &task.id[..task.id.len().min(8)],
-            &task.title,
-            // &task.status.to_string(),
-            // &task.priority.to_string(),
-            &format_status(&task.status),
-            &format_priority(&task.priority),
-            &tag_str,
-            &due_str,
+            Cell::new(&task.id[..task.id.len().min(8)]),
+            Cell::new(&task.title),
+            status_cell(&task.status),
+            priority_cell(&task.priority),
+            Cell::new(&tag_str),
+            Cell::new(&due_str),
         ]);
     }
     println!("{table}");
 }
 
-pub fn format_status(status: &Status) -> String {
+fn status_cell(status: &Status) -> Cell {
     match status {
-        Status::Done => "已完成".green().strikethrough(),
-        Status::InProgress => "进行中".blue(),
-        Status::Todo => "未完成".bright_black(),
+        Status::Done => {
+            Cell::new("已完成").fg(Color::Green).add_attribute(Attribute::CrossedOut)
+        }
+        Status::InProgress => Cell::new("进行中").fg(Color::Blue),
+        Status::Todo => Cell::new("未完成").fg(Color::DarkGrey),
     }
-    .to_string()
 }
 
-pub fn format_priority(priority: &Priority) -> String {
+fn priority_cell(priority: &Priority) -> Cell {
     match priority {
-        Priority::High => "高".red(),
-        Priority::Medium => "中".yellow(),
-        Priority::Low => "低".green(),
+        Priority::High => Cell::new("高").fg(Color::Red),
+        Priority::Medium => Cell::new("中").fg(Color::Yellow),
+        Priority::Low => Cell::new("低").fg(Color::Green),
     }
-    .to_string()
 }
 
 pub fn print_success(msg: &str) {

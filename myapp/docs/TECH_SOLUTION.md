@@ -4,27 +4,27 @@
 
 ### 1.1 核心依赖
 
-| 类别 | 库 | 版本 | 用途 |
-|------|------|------|------|
-| CLI 解析 | `clap` | 4.x (derive) | 命令行参数解析、子命令定义 |
-| 序列化 | `serde` | 1.x | 数据模型序列化框架 |
-| JSON | `serde_json` | 1.x | JSON 格式读写 |
-| 时间 | `chrono` | 0.4.x | 日期时间处理，带 serde 支持 |
-| UUID | `uuid` | 1.x (v4) | 任务唯一 ID 生成 |
-| 终端颜色 | `colored` | 2.x | 终端彩色文本输出 |
-| 表格 | `comfy-table` | 7.x | 终端表格渲染 |
-| CSV | `csv` | 1.x | CSV 文件导出 |
-| 错误(应用) | `anyhow` | 1.x | 应用层错误处理 |
-| 错误(库) | `thiserror` | 1.x | 库层错误类型定义 |
-| 目录 | `dirs` | 5.x | 获取跨平台 home 目录 |
+| 类别       | 库            | 版本         | 用途                        |
+| ---------- | ------------- | ------------ | --------------------------- |
+| CLI 解析   | `clap`        | 4.x (derive) | 命令行参数解析、子命令定义  |
+| 序列化     | `serde`       | 1.x          | 数据模型序列化框架          |
+| JSON       | `serde_json`  | 1.x          | JSON 格式读写               |
+| 时间       | `chrono`      | 0.4.x        | 日期时间处理，带 serde 支持 |
+| UUID       | `uuid`        | 1.x (v4)     | 任务唯一 ID 生成            |
+| 终端颜色   | `colored`     | 2.x          | 终端彩色文本输出            |
+| 表格       | `comfy-table` | 7.x          | 终端表格渲染                |
+| CSV        | `csv`         | 1.x          | CSV 文件导出                |
+| 错误(应用) | `anyhow`      | 1.x          | 应用层错误处理              |
+| 错误(库)   | `thiserror`   | 1.x          | 库层错误类型定义            |
+| 目录       | `dirs`        | 5.x          | 获取跨平台 home 目录        |
 
 ### 1.2 开发依赖
 
-| 类别 | 库 | 版本 | 用途 |
-|------|------|------|------|
-| 集成测试 | `assert_cmd` | 2.x | CLI 集成测试框架 |
-| 断言 | `predicates` | 3.x | 测试断言辅助 |
-| 临时目录 | `tempfile` | 3.x | 测试用临时目录 |
+| 类别     | 库           | 版本 | 用途             |
+| -------- | ------------ | ---- | ---------------- |
+| 集成测试 | `assert_cmd` | 2.x  | CLI 集成测试框架 |
+| 断言     | `predicates` | 3.x  | 测试断言辅助     |
+| 临时目录 | `tempfile`   | 3.x  | 测试用临时目录   |
 
 ### 1.3 Cargo.toml 配置参考
 
@@ -83,16 +83,16 @@ taskflow/
 
 ### 各文件职责
 
-| 文件 | 职责 | 关键类型 |
-|------|------|---------|
-| `main.rs` | 入口函数，解析 CLI，调用 service，处理错误输出 | `fn main()` |
-| `cli.rs` | 定义所有子命令和参数结构 | `Cli`, `Commands` enum |
-| `models/task.rs` | Task 数据模型 | `Task` struct |
-| `models/enums.rs` | 状态和优先级枚举 | `Status`, `Priority` |
-| `store.rs` | 数据持久化，JSON 文件操作 | `Store` trait, `JsonFileStore` |
-| `service.rs` | 业务逻辑，数据校验，调用 store | `TaskService` |
-| `display.rs` | 终端输出格式化 | `print_task_table()`, `print_stats()` |
-| `error.rs` | 错误类型定义 | `TaskError` enum |
+| 文件              | 职责                                           | 关键类型                              |
+| ----------------- | ---------------------------------------------- | ------------------------------------- |
+| `main.rs`         | 入口函数，解析 CLI，调用 service，处理错误输出 | `fn main()`                           |
+| `cli.rs`          | 定义所有子命令和参数结构                       | `Cli`, `Commands` enum                |
+| `models/task.rs`  | Task 数据模型                                  | `Task` struct                         |
+| `models/enums.rs` | 状态和优先级枚举                               | `Status`, `Priority`                  |
+| `store.rs`        | 数据持久化，JSON 文件操作                      | `Store` trait, `JsonFileStore`        |
+| `service.rs`      | 业务逻辑，数据校验，调用 store                 | `TaskService`                         |
+| `display.rs`      | 终端输出格式化                                 | `print_task_table()`, `print_stats()` |
+| `error.rs`        | 错误类型定义                                   | `TaskError` enum                      |
 
 ---
 
@@ -196,6 +196,7 @@ pub struct Task {
 ```
 
 **设计要点：**
+
 - `id` 使用 `String` 存储 UUID，方便 JSON 序列化和用户输入
 - `Status` 和 `Priority` 使用 `serde(rename_all = "snake_case")` 保证 JSON 可读性
 - `DateTime<Utc>` 统一使用 UTC 时间，避免时区问题
@@ -205,13 +206,13 @@ pub struct Task {
 
 #### 文件路径规范
 
-| 项目 | 值 |
-|------|------|
-| 数据目录 | `~/.taskflow/` |
-| 主数据文件 | `data.json` |
-| 备份文件 | `data.json.bak` |
-| 完整路径示例 (Windows) | `C:\Users\xyzq\.taskflow\data.json` |
-| 完整路径示例 (Linux/Mac) | `/home/xyzq/.taskflow/data.json` |
+| 项目                     | 值                                  |
+| ------------------------ | ----------------------------------- |
+| 数据目录                 | `~/.taskflow/`                      |
+| 主数据文件               | `data.json`                         |
+| 备份文件                 | `data.json.bak`                     |
+| 完整路径示例 (Windows)   | `C:\Users\xyzq\.taskflow\data.json` |
+| 完整路径示例 (Linux/Mac) | `/home/xyzq/.taskflow/data.json`    |
 
 #### Store Trait 接口
 
@@ -219,7 +220,7 @@ pub struct Task {
 pub trait Store {
     /// 加载所有任务
     fn load(&self) -> Result<Vec<Task>>;
-    
+
     /// 保存所有任务（覆盖写入）
     fn save(&self, tasks: &[Task]) -> Result<()>;
 }
@@ -237,31 +238,32 @@ pub struct JsonFileStore {
 
 **目录与路径操作：**
 
-| API | 用途 | 示例 |
-|-----|------|------|
-| `dirs::home_dir()` | 获取用户 home 目录 | `Some("/home/xyzq")` |
-| `PathBuf::push()` | 拼接路径 | `path.push(".taskflow")` |
-| `std::fs::create_dir_all()` | 递归创建目录 | 创建 `~/.taskflow/` |
-| `Path::exists()` | 检查文件是否存在 | 判断 `data.json` 是否存在 |
+| API                         | 用途               | 示例                      |
+| --------------------------- | ------------------ | ------------------------- |
+| `dirs::home_dir()`          | 获取用户 home 目录 | `Some("/home/xyzq")`      |
+| `PathBuf::push()`           | 拼接路径           | `path.push(".taskflow")`  |
+| `std::fs::create_dir_all()` | 递归创建目录       | 创建 `~/.taskflow/`       |
+| `Path::exists()`            | 检查文件是否存在   | 判断 `data.json` 是否存在 |
 
 **文件读写：**
 
-| API | 用途 | 示例 |
-|-----|------|------|
-| `std::fs::read_to_string()` | 读取文件内容为字符串 | 读取 JSON |
-| `std::fs::write()` | 写入字符串到文件 | 写入 JSON |
-| `std::fs::copy()` | 复制文件（用于备份） | `data.json` → `data.json.bak` |
+| API                         | 用途                 | 示例                          |
+| --------------------------- | -------------------- | ----------------------------- |
+| `std::fs::read_to_string()` | 读取文件内容为字符串 | 读取 JSON                     |
+| `std::fs::write()`          | 写入字符串到文件     | 写入 JSON                     |
+| `std::fs::copy()`           | 复制文件（用于备份） | `data.json` → `data.json.bak` |
 
 **JSON 序列化：**
 
-| API | 用途 | 示例 |
-|-----|------|------|
-| `serde_json::from_str::<Vec<Task>>()` | JSON 字符串 → Vec<Task> | 反序列化 |
-| `serde_json::to_string_pretty()` | Vec<Task> → 格式化 JSON | 序列化（带缩进，便于阅读） |
+| API                                   | 用途                    | 示例                       |
+| ------------------------------------- | ----------------------- | -------------------------- |
+| `serde_json::from_str::<Vec<Task>>()` | JSON 字符串 → Vec<Task> | 反序列化                   |
+| `serde_json::to_string_pretty()`      | Vec<Task> → 格式化 JSON | 序列化（带缩进，便于阅读） |
 
 #### 实现流程
 
 **`new()` 构造函数：**
+
 ```
 1. 获取 home_dir
 2. 拼接路径: home/.taskflow/data.json
@@ -270,6 +272,7 @@ pub struct JsonFileStore {
 ```
 
 **`load()` 加载：**
+
 ```
 1. 检查文件是否存在
    - 不存在 → 返回 Ok(vec![])
@@ -280,6 +283,7 @@ pub struct JsonFileStore {
 ```
 
 **`save()` 保存：**
+
 ```
 1. 备份旧文件（如果存在）
    - copy("data.json", "data.json.bak")
@@ -290,25 +294,26 @@ pub struct JsonFileStore {
 
 #### 错误处理
 
-| 场景 | 错误信息 |
-|------|----------|
-| 无法获取 home 目录 | `"无法获取用户主目录"` |
-| 创建目录失败 | `"创建数据目录失败: {err}"` |
-| 读取文件失败 | `"读取数据文件失败: {err}"` |
-| JSON 解析失败 | `"数据文件格式错误: {err}"` |
-| 写入文件失败 | `"写入数据文件失败: {err}"` |
+| 场景               | 错误信息                    |
+| ------------------ | --------------------------- |
+| 无法获取 home 目录 | `"无法获取用户主目录"`      |
+| 创建目录失败       | `"创建数据目录失败: {err}"` |
+| 读取文件失败       | `"读取数据文件失败: {err}"` |
+| JSON 解析失败      | `"数据文件格式错误: {err}"` |
+| 写入文件失败       | `"写入数据文件失败: {err}"` |
 
 #### 测试建议
 
-| 测试场景 | 方法 |
-|----------|------|
-| 空文件加载 | 文件不存在时返回空 Vec |
-| 正常读写 | 写入后读取，验证数据一致 |
-| 备份机制 | 写入两次，验证 `.bak` 文件存在 |
+| 测试场景   | 方法                           |
+| ---------- | ------------------------------ |
+| 空文件加载 | 文件不存在时返回空 Vec         |
+| 正常读写   | 写入后读取，验证数据一致       |
+| 备份机制   | 写入两次，验证 `.bak` 文件存在 |
 
 测试时使用 `tempfile::tempdir()` 创建临时目录，避免污染真实数据。
 
 **设计要点：**
+
 - 使用 `trait` 抽象存储接口，测试时可注入 `MemoryStore`
 - 文件不存在时返回空列表，不报错
 - 写入前自动备份，防止数据丢失
@@ -342,19 +347,19 @@ pub struct TaskStats {
 
 #### 方法清单
 
-| 方法 | 签名 | 职责 |
-|------|------|------|
-| `new` | `() -> Result<Self>` | 构造 service，初始化 store |
-| `add_task` | `(title, desc, priority, tags, due) -> Result<Task>` | 创建任务 |
-| `list_tasks` | `(status, priority, tag) -> Result<Vec<Task>>` | 列出/筛选任务 |
-| `update_task` | `(id, title, status, priority, desc, tags, due) -> Result<Task>` | 更新任务 |
-| `delete_task` | `(id) -> Result<Task>` | 删除任务 |
-| `search_tasks` | `(keyword) -> Result<Vec<Task>>` | 搜索任务 |
-| `get_stats` | `() -> Result<TaskStats>` | 统计信息 |
-| `export_tasks` | `(format, output) -> Result<String>` | 导出数据 |
-| `find_task_by_id` | `(tasks, id) -> Result<usize>` | 内部辅助：按 ID 查找索引 |
-| `validate_title` | `(title) -> Result<()>` | 内部辅助：校验标题 |
-| `parse_due_date` | `(due) -> Result<Option<NaiveDate>>` | 内部辅助：解析日期字符串 |
+| 方法              | 签名                                                             | 职责                       |
+| ----------------- | ---------------------------------------------------------------- | -------------------------- |
+| `new`             | `() -> Result<Self>`                                             | 构造 service，初始化 store |
+| `add_task`        | `(title, desc, priority, tags, due) -> Result<Task>`             | 创建任务                   |
+| `list_tasks`      | `(status, priority, tag) -> Result<Vec<Task>>`                   | 列出/筛选任务              |
+| `update_task`     | `(id, title, status, priority, desc, tags, due) -> Result<Task>` | 更新任务                   |
+| `delete_task`     | `(id) -> Result<Task>`                                           | 删除任务                   |
+| `search_tasks`    | `(keyword) -> Result<Vec<Task>>`                                 | 搜索任务                   |
+| `get_stats`       | `() -> Result<TaskStats>`                                        | 统计信息                   |
+| `export_tasks`    | `(format, output) -> Result<String>`                             | 导出数据                   |
+| `find_task_by_id` | `(tasks, id) -> Result<usize>`                                   | 内部辅助：按 ID 查找索引   |
+| `validate_title`  | `(title) -> Result<()>`                                          | 内部辅助：校验标题         |
+| `parse_due_date`  | `(due) -> Result<Option<NaiveDate>>`                             | 内部辅助：解析日期字符串   |
 
 #### 方法详细设计
 
@@ -649,7 +654,7 @@ pub enum Commands {
 ```rust
 use colored::Colorize;
 use comfy_table::{
-    presets::UTF8_FULL, Cell, CellAlignment, ContentArrangement, Table,
+    presets::UTF8_FULL, Attribute, Cell, Color, ContentArrangement, Table,
 };
 
 pub fn print_task_table(tasks: &[Task]) {
@@ -664,49 +669,48 @@ pub fn print_task_table(tasks: &[Task]) {
 
     for task in tasks {
         let due_str = task.due_date.map_or("--".to_string(), |d| d.to_string());
+        let tag_str = if task.tags.is_empty() {
+            "-".to_string()
+        } else {
+            task.tags.join(",")
+        };
 
-        // 必须用 Cell::new 包裹！原因见下方"对齐约束"
-        // - 自动忽略 ANSI 颜色转义码，按可见字符算列宽
-        // - 配合 column_mut() 可单独设置该列对齐方式
+        // 表格内颜色必须用 comfy_table 原生 Cell 样式 API，不能用 colored
+        // 原因见下方"对齐约束"
         table.add_row(vec![
             Cell::new(&task.id[..task.id.len().min(8)]),    // UUID 安全截断：min(8, len)
             Cell::new(&task.title),
-            Cell::new(format_status(&task.status)),          // 带 ANSI 转义码，由 Cell 自动处理
-            Cell::new(format_priority(&task.priority)),
-            Cell::new(&task.tags.join(",")),
+            status_cell(&task.status),                        // 返回带样式的 Cell
+            priority_cell(&task.priority),
+            Cell::new(&tag_str),
             Cell::new(&due_str),
         ]);
     }
 
-    // 按列设置对齐方式（索引对应 set_header 的列顺序）
-    let _ = table.column_mut(1).map(|c| c.set_cell_alignment(CellAlignment::Left));   // 标题
-    let _ = table.column_mut(2).map(|c| c.set_cell_alignment(CellAlignment::Center)); // 状态
-    let _ = table.column_mut(3).map(|c| c.set_cell_alignment(CellAlignment::Center)); // 优先级
-    let _ = table.column_mut(4).map(|c| c.set_cell_alignment(CellAlignment::Left));   // 标签
-    let _ = table.column_mut(5).map(|c| c.set_cell_alignment(CellAlignment::Center)); // 截止日期
-
     println!("{table}");
 }
 
-pub fn format_status(status: &Status) -> String {
+/// 状态单元格：用 comfy_table 原生 Color/Attribute 样式
+fn status_cell(status: &Status) -> Cell {
     match status {
-        Status::Done => "已完成".green().strikethrough(),       // PRD F7：Done=绿色删除线
-        Status::InProgress => "进行中".blue(),
-        Status::Todo => "未完成".bright_black(),
+        Status::Done => {
+            Cell::new("已完成").fg(Color::Green).add_attribute(Attribute::CrossedOut) // PRD F7：Done=绿色删除线
+        }
+        Status::InProgress => Cell::new("进行中").fg(Color::Blue),
+        Status::Todo => Cell::new("未完成").fg(Color::DarkGrey),
     }
-    .to_string()
 }
 
-pub fn format_priority(priority: &Priority) -> String {
+/// 优先级单元格：用 comfy_table 原生 Color 样式
+fn priority_cell(priority: &Priority) -> Cell {
     match priority {
-        Priority::High => "高".red(),
-        Priority::Medium => "中".yellow(),
-        Priority::Low => "低".green(),
+        Priority::High => Cell::new("高").fg(Color::Red),
+        Priority::Medium => Cell::new("中").fg(Color::Yellow),
+        Priority::Low => Cell::new("低").fg(Color::Green),
     }
-    .to_string()
 }
 
-/// 成功消息：自动加 ✓ 前缀 + 绿色
+/// 成功消息：自动加 ✓ 前缀 + 绿色（此处仍用 colored，非表格场景无对齐问题）
 pub fn print_success(msg: &str) {
     println!("✓ {}", msg.green());
 }
@@ -731,43 +735,33 @@ pub fn print_warning(msg: &str) {
 
 #### 设计与契约
 
-| 函数 | 通道 | 前缀 | 颜色 | 调用方职责 |
-|------|------|------|------|----------|
-| `print_success` | stdout | `✓ ` | 绿 | 传"主体内容"，前缀/颜色由 display 自动加 |
-| `print_error` | stderr | `✗ 错误：` | 红 | 同上 |
-| `print_info` | stdout | 无 | 无 | 同上 |
-| `print_warning` | stdout | 无 | 黄 | 调用方控制前缀（仅着色） |
-| `print_task_table` | stdout | 无 | 表格列自带 | 传 `&[Task]` |
+| 函数               | 通道   | 前缀       | 颜色       | 调用方职责                               |
+| ------------------ | ------ | ---------- | ---------- | ---------------------------------------- |
+| `print_success`    | stdout | `✓ `       | 绿         | 传"主体内容"，前缀/颜色由 display 自动加 |
+| `print_error`      | stderr | `✗ 错误：` | 红         | 同上                                     |
+| `print_info`       | stdout | 无         | 无         | 同上                                     |
+| `print_warning`    | stdout | 无         | 黄         | 调用方控制前缀（仅着色）                 |
+| `print_task_table` | stdout | 无         | 表格列自带 | 传 `&[Task]`                             |
 
 #### 对齐约束
 
 ##### 颜色规则（严格遵循 [PRD F7](docs/PRD.md)）
 
-- 状态 Done = **绿色删除线**（`.green().strikethrough()`）
-- 状态 InProgress = 蓝色（`.blue()`）
-- 状态 Todo = 灰色（`.bright_black()`）
+- 状态 Done = **绿色删除线**（`Color::Green` + `Attribute::CrossedOut`）
+- 状态 InProgress = 蓝色（`Color::Blue`）
+- 状态 Todo = 灰色（`Color::DarkGrey`）
 - 优先级 High = 红、Medium = 黄、Low = 绿
 
 ##### 表格渲染约束
 
-- **必须用 `Cell::new()` 包裹每列内容**
-  - 原因：`format_status` / `format_priority` 返回的字符串含 ANSI 颜色转义码（`\x1b[...m`），`comfy_table` 默认把转义码也算成字符宽度，导致彩色列被算得超宽
-  - `Cell::new()` 内部会**自动忽略 ANSI 转义码**，按可见字符算宽
+- **表格内颜色必须用 `comfy_table` 原生 `Cell` 样式 API**（`Cell::new(text).fg(Color::...)` / `.add_attribute(Attribute::...)`），**不能用 `colored` 库**
+  - 原因：`colored` 库通过在字符串中嵌入 ANSI 转义码（`\x1b[...m`）实现着色，`comfy_table` 默认把转义码也算成字符宽度，导致彩色列被算得超宽、表格错位
+  - 改用 `comfy_table` 原生 `Color` / `Attribute` 后，样式信息与文本内容分离，`comfy_table` 按可见字符算宽，表格正确对齐
+  - `colored` 库仍保留给 `print_success` / `print_error` / `print_warning` 等非表格场景使用（单行输出无对齐问题）
 - **必须用 `load_preset(UTF8_FULL)`** 加载 Unicode 全边框，否则表格无横线/竖线
 - **必须用 `set_content_arrangement(ContentArrangement::Dynamic)`** 让表格按内容自适应列宽
 - **ID 必须用 `min(8)` 防 panic**：mock 测试数据 id 可能很短（`"1"`、`"2"`），裸切片 `&id[..8]` 会 panic
 - **CJK 字符宽度**：当前默认靠 `Dynamic` 自适应；若发现中文列依然错位（不同终端字体宽度不同），可加 `unicode-width` crate 用 `UnicodeWidthStr` 精确计算
-
-##### 对齐方式（column_mut + CellAlignment）
-
-| 列 | 索引 | 对齐 |
-|----|------|------|
-| ID | 0 | 默认（按内容） |
-| 标题 | 1 | Left |
-| 状态 | 2 | Center |
-| 优先级 | 3 | Center |
-| 标签 | 4 | Left |
-| 截止日期 | 5 | Center |
 
 ##### `print_warning` 当前无 caller
 
@@ -888,41 +882,42 @@ fn run() -> Result<()> {
 
 #### Dispatch 映射表
 
-| 子命令 | service 方法 | 备注 |
-|--------|-------------|------|
-| `Add` | `add_task(title, desc, priority, tags, due)` | T1.6 已就绪 |
-| `List` | `list_tasks(status, priority, tag)` | T1.6 已就绪 |
-| `Update` | `update_task(id, title, status, priority, desc, tags, due)` | T1.6 仅传入 cli 提供的字段，未提供的传 `None` |
-| `Delete` | `delete_task(id)` | T1.6 不实现交互确认（见 T3.1），`--force` 仅作为占位 |
-| `Search` | `search_task(keyword)` | T2.2 已实现：大小写不敏感，命中 title 或 description |
-| `Stats` | （stub）`anyhow::bail!("未实现")` | T2.4 实现 |
-| `Export` | （stub）`anyhow::bail!("未实现")` | T3.2 实现 |
+| 子命令   | service 方法                                                | 备注                                                 |
+| -------- | ----------------------------------------------------------- | ---------------------------------------------------- |
+| `Add`    | `add_task(title, desc, priority, tags, due)`                | T1.6 已就绪                                          |
+| `List`   | `list_tasks(status, priority, tag)`                         | T1.6 已就绪                                          |
+| `Update` | `update_task(id, title, status, priority, desc, tags, due)` | T1.6 仅传入 cli 提供的字段，未提供的传 `None`        |
+| `Delete` | `delete_task(id)`                                           | T1.6 不实现交互确认（见 T3.1），`--force` 仅作为占位 |
+| `Search` | `search_task(keyword)`                                      | T2.2 已实现：大小写不敏感，命中 title 或 description |
+| `Stats`  | （stub）`anyhow::bail!("未实现")`                           | T2.4 实现                                            |
+| `Export` | （stub）`anyhow::bail!("未实现")`                           | T3.2 实现                                            |
 
 #### 输出规范
 
 `main.rs` 通过 `display::*` 函数统一所有输出，前缀/颜色/通道由 display 内部负责，main 只传"主体内容"。
 
-| 场景 | 调用函数 | 实际输出 | 通道 |
-|------|---------|---------|------|
-| 单条任务操作成功（Add/Update/Delete） | `print_success(&format!(...))` | `✓ <消息>：<Task Display>` | stdout |
-| `list` 有结果 | `print_task_table(&tasks)` | 表格 | stdout |
-| `list` 无结果 | `print_info("暂无任务")` | `暂无任务` | stdout |
-| `search` 命中 | `println!("搜索到 N 条结果：")` + `print_task_table(&res)` | 计数 + 表格 | stdout |
-| `search` 无结果 | `print_info("未找到匹配任务")` | `未找到匹配任务` | stdout |
-| 业务错误（TaskError） | 经 `?` 上抛到 main → `print_error(&format!("{e:#}"))` | `✗ 错误：<anyhow chain>` | stderr |
-| 系统错误（io/json） | 同上 | 同上 | stderr |
-| 输入校验警告（T3.4 启用） | `print_warning(&format!("⚠ {msg}"))` | `⚠ <消息>` | stdout |
+| 场景                                  | 调用函数                                                   | 实际输出                   | 通道   |
+| ------------------------------------- | ---------------------------------------------------------- | -------------------------- | ------ |
+| 单条任务操作成功（Add/Update/Delete） | `print_success(&format!(...))`                             | `✓ <消息>：<Task Display>` | stdout |
+| `list` 有结果                         | `print_task_table(&tasks)`                                 | 表格                       | stdout |
+| `list` 无结果                         | `print_info("暂无任务")`                                   | `暂无任务`                 | stdout |
+| `search` 命中                         | `println!("搜索到 N 条结果：")` + `print_task_table(&res)` | 计数 + 表格                | stdout |
+| `search` 无结果                       | `print_info("未找到匹配任务")`                             | `未找到匹配任务`           | stdout |
+| 业务错误（TaskError）                 | 经 `?` 上抛到 main → `print_error(&format!("{e:#}"))`      | `✗ 错误：<anyhow chain>`   | stderr |
+| 系统错误（io/json）                   | 同上                                                       | 同上                       | stderr |
+| 输入校验警告（T3.4 启用）             | `print_warning(&format!("⚠ {msg}"))`                       | `⚠ <消息>`                 | stdout |
 
 前缀/颜色约定（display 内部硬编码）：
 
-| 类型 | 前缀 | 颜色 |
-|------|------|------|
-| 成功 | `✓ `（U+2713 + 半角空格） | 绿 |
-| 错误 | `✗ 错误：`（U+2717 + 半角空格） | 红 |
-| 信息 | 无 | 无 |
-| 警告 | `⚠ `（U+26A0 + 半角空格） | 黄 |
+| 类型 | 前缀                            | 颜色 |
+| ---- | ------------------------------- | ---- |
+| 成功 | `✓ `（U+2713 + 半角空格）       | 绿   |
+| 错误 | `✗ 错误：`（U+2717 + 半角空格） | 红   |
+| 信息 | 无                              | 无   |
+| 警告 | `⚠ `（U+26A0 + 半角空格）       | 黄   |
 
 > **历史推迟项（已落地）**
+>
 > - ~~不引入 `comfy-table` 渲染~~ → T2.3 已接入
 > - ~~不引入 `colored` 上色~~ → T2.3 已接入
 > - ~~不使用 `display.rs` 模块~~ → 已接入 main.rs
@@ -980,22 +975,26 @@ cargo run -- add "测试日期" --due 2099-01-01
 ## 5. 关键技术点说明
 
 ### 5.1 为什么选 JSON 而不是 SQLite？
+
 - 初学者无需学习 SQL
 - `serde` 是 Rust 生态核心技能
 - 文件可直接查看和手动编辑
 - 1000 条任务性能完全足够
 
 ### 5.2 为什么用 UUID 而不是自增 ID？
+
 - 无需维护计数器
 - 删除后无 ID 冲突风险
 - 用户只需输入前 8 位即可定位（显示截断）
 
 ### 5.3 为什么用 trait 抽象 Store？
+
 - 测试时可注入内存实现，不依赖文件系统
 - 未来可扩展其他存储后端（如 SQLite）
 - 符合 Rust 的 trait 最佳实践
 
 ### 5.4 错误处理策略
+
 - `error.rs` 用 `thiserror` 定义业务错误类型
 - `main.rs` 用 `anyhow::Result` 统一捕获和输出
 - 所有错误路径输出友好提示，不暴露内部细节
@@ -1006,11 +1005,11 @@ cargo run -- add "测试日期" --due 2099-01-01
 
 ### 6.1 单元测试
 
-| 模块 | 测试内容 |
-|------|---------|
-| `models` | 序列化/反序列化、Display 输出 |
-| `store` | 文件读写、空文件处理、备份逻辑 |
-| `service` | 标题校验、CRUD 逻辑、筛选逻辑 |
+| 模块      | 测试内容                       |
+| --------- | ------------------------------ |
+| `models`  | 序列化/反序列化、Display 输出  |
+| `store`   | 文件读写、空文件处理、备份逻辑 |
+| `service` | 标题校验、CRUD 逻辑、筛选逻辑  |
 
 ### 6.2 集成测试
 
@@ -1030,6 +1029,7 @@ fn test_add_and_list() {
 ```
 
 ### 6.3 测试数据隔离
+
 - 使用 `tempfile` 创建临时目录
 - 通过环境变量 `TASKFLOW_DATA_DIR` 覆盖默认路径
 - 每个测试独立，互不影响
@@ -1039,6 +1039,7 @@ fn test_add_and_list() {
 ## 7. 实现建议
 
 ### 7.1 推荐实现顺序
+
 1. 先跑通 `models` → 确保数据结构正确
 2. 再实现 `store` → 确保数据能持久化
 3. 然后 `cli` → 定义好接口
@@ -1046,13 +1047,16 @@ fn test_add_and_list() {
 5. 最后 `display` → 美化输出
 
 ### 7.2 常见陷阱提醒
+
 - `serde` 的 `rename_all` 要统一，否则 JSON 字段名不一致
 - `chrono` 的 `NaiveDate` 解析需要用 `NaiveDate::parse_from_str`
 - `uuid` 的 v4 feature 必须在 Cargo.toml 中显式开启
 - Windows 路径分隔符用 `PathBuf` 处理，不要硬编码 `/`
 - `colored` 在 Windows 终端可能需要启用 ANSI 支持
+- **表格内不能用 `colored` 着色**：`colored` 嵌入的 ANSI 转义码会被 `comfy_table` 计入字符宽度导致列错位，表格内颜色须用 `comfy_table` 原生 `Cell` 样式 API（`Color` / `Attribute`）
 
 ### 7.3 调试技巧
+
 - 使用 `dbg!()` 宏快速调试值
 - 使用 `serde_json::to_string_pretty()` 查看 JSON 数据
 - 用 `cargo run -- add "test"` 快速测试
