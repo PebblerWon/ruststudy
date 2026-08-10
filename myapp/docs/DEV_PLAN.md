@@ -133,6 +133,8 @@ taskflow stats
   - 删除前交互式确认提示
   - 支持 `--force` 跳过确认
   - **产出：** 防误删机制
+  - **技术方案：** 见 [TECH_SOLUTION.md § 4.8 删除确认流程](docs/TECH_SOLUTION.md)
+  - **实现要点：** `service.rs` 新增 `get_task_by_id()` 供确认前预览任务标题；`main.rs` 读取 `--force` 标志，无 `--force` 时读 stdin 判定 y/n；确认提示用 `print_warning`，取消用 `print_info`
 
 - [ ] **T3.2 CSV 导出**
   - 新增 `export` 子命令

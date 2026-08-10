@@ -364,6 +364,7 @@ pub struct TaskStats {
 | `get_stats`       | `() -> Result<TaskStats>`                                        | 统计信息                   |
 | `export_tasks`    | `(format, output) -> Result<String>`                             | 导出数据                   |
 | `find_task_by_id` | `(tasks, id) -> Result<usize>`                                   | 内部辅助：按 ID 查找索引   |
+| `get_task_by_id`  | `(id) -> Result<Task>`                                           | 预览任务（供删除确认等）   |
 | `validate_title`  | `(title) -> Result<()>`                                          | 内部辅助：校验标题         |
 | `parse_due_date`  | `(due) -> Result<Option<NaiveDate>>`                             | 内部辅助：解析日期字符串   |
 
@@ -972,7 +973,7 @@ fn run() -> Result<()> {
 | `Add`    | `add_task(title, desc, priority, tags, due)`                | T1.6 已就绪                                          |
 | `List`   | `list_tasks(status, priority, tag)`                         | T1.6 已就绪                                          |
 | `Update` | `update_task(id, title, status, priority, desc, tags, due)` | T1.6 仅传入 cli 提供的字段，未提供的传 `None`        |
-| `Delete` | `delete_task(id)`                                           | T1.6 不实现交互确认（见 T3.1），`--force` 仅作为占位 |
+| `Delete` | `get_task_by_id(id)` + `delete_task(id)`                    | T3.1：无 `--force` 时先预览再确认，详见 § 4.8        |
 | `Search` | `search_task(keyword)`                                      | T2.2 已实现：大小写不敏感，命中 title 或 description |
 | `Stats`  | `get_stats()`                                               | T2.4 已实现：TaskStats 统计 + print_stats 展示       |
 | `Export` | （stub）`anyhow::bail!("未实现")`                           | T3.2 实现                                            |
@@ -981,16 +982,18 @@ fn run() -> Result<()> {
 
 `main.rs` 通过 `display::*` 函数统一所有输出，前缀/颜色/通道由 display 内部负责，main 只传"主体内容"。
 
-| 场景                                  | 调用函数                                                   | 实际输出                   | 通道   |
-| ------------------------------------- | ---------------------------------------------------------- | -------------------------- | ------ |
-| 单条任务操作成功（Add/Update/Delete） | `print_success(&format!(...))`                             | `✓ <消息>：<Task Display>` | stdout |
-| `list` 有结果                         | `print_task_table(&tasks)`                                 | 表格                       | stdout |
-| `list` 无结果                         | `print_info("暂无任务")`                                   | `暂无任务`                 | stdout |
-| `search` 命中                         | `println!("搜索到 N 条结果：")` + `print_task_table(&res)` | 计数 + 表格                | stdout |
-| `search` 无结果                       | `print_info("未找到匹配任务")`                             | `未找到匹配任务`           | stdout |
-| 业务错误（TaskError）                 | 经 `?` 上抛到 main → `print_error(&format!("{e:#}"))`      | `✗ 错误：<anyhow chain>`   | stderr |
-| 系统错误（io/json）                   | 同上                                                       | 同上                       | stderr |
-| 输入校验警告（T3.4 启用）             | `print_warning(&format!("⚠ {msg}"))`                       | `⚠ <消息>`                 | stdout |
+| 场景                                  | 调用函数                                                   | 实际输出                      | 通道   |
+| ------------------------------------- | ---------------------------------------------------------- | ----------------------------- | ------ |
+| 单条任务操作成功（Add/Update/Delete） | `print_success(&format!(...))`                             | `✓ <消息>：<Task Display>`    | stdout |
+| Delete 确认提示（T3.1）               | `print_warning(&format!(...))`                             | `⚠ 确认删除任务 "..."？(y/n)` | stdout |
+| Delete 用户取消（T3.1）               | `print_info("已取消删除")`                                 | `已取消删除`                  | stdout |
+| `list` 有结果                         | `print_task_table(&tasks)`                                 | 表格                          | stdout |
+| `list` 无结果                         | `print_info("暂无任务")`                                   | `暂无任务`                    | stdout |
+| `search` 命中                         | `println!("搜索到 N 条结果：")` + `print_task_table(&res)` | 计数 + 表格                   | stdout |
+| `search` 无结果                       | `print_info("未找到匹配任务")`                             | `未找到匹配任务`              | stdout |
+| 业务错误（TaskError）                 | 经 `?` 上抛到 main → `print_error(&format!("{e:#}"))`      | `✗ 错误：<anyhow chain>`      | stderr |
+| 系统错误（io/json）                   | 同上                                                       | 同上                          | stderr |
+| 输入校验警告（T3.4 启用）             | `print_warning(&format!("⚠ {msg}"))`                       | `⚠ <消息>`                    | stdout |
 
 前缀/颜色约定（display 内部硬编码）：
 
@@ -1006,8 +1009,8 @@ fn run() -> Result<()> {
 > - ~~不引入 `comfy-table` 渲染~~ → T2.3 已接入
 > - ~~不引入 `colored` 上色~~ → T2.3 已接入
 > - ~~不使用 `display.rs` 模块~~ → 已接入 main.rs
-> - 不实现 `Delete` 的交互确认 → T3.1
-> - `print_warning` 无 caller → T3.4 输入校验时启用
+> - ~~不实现 `Delete` 的交互确认~~ → T3.1 设计就绪（§ 4.8）
+> - `print_warning` 无 caller → T3.1 删除确认 + T3.4 输入校验启用
 
 #### 错误处理收敛
 
@@ -1054,6 +1057,117 @@ cargo run -- add "测试日期" --due 2099-01-01
 - 错误路径输出中文友好提示且退出码非 0
 - `cargo build` 无 warning（建议项）
 - 单元测试与既有 service/store/models 测试不回归：`cargo test` 全绿
+
+### 4.8 删除确认流程（对应 T3.1 / PRD F4 + F9）
+
+#### 交互流程
+
+```
+用户执行 taskflow delete <id>
+    │
+    ├─ --force / -f ？
+    │   ├─ 是 → 跳过确认，直接删除
+    │   └─ 否 ↓
+    │
+    ▼
+service.get_task_by_id(id)     // 预览：加载任务，返回 Task clone
+    │
+    ├─ 未找到 → TaskError::NotFound → print_error
+    ├─ 多条匹配 → TaskError::AmbiguousId → print_error
+    └─ 找到 ↓
+    │
+    ▼
+print_warning("确认删除任务 \"<title>\" (<id前8位>)？(y/n)")
+    │
+    ▼
+stdin read_line              // 读取用户输入
+    │
+    ├─ "y" / "Y" → service.delete_task(id) → print_success
+    └─ 其他（含 EOF / "n" / 任意） → print_info("已取消删除") → 正常返回
+```
+
+#### service.rs：新增 `get_task_by_id`
+
+```
+输入：id: &str
+输出：Result<Task>      // 返回 Task clone，供确认前预览标题
+流程：
+  1. store.load() 加载所有任务
+  2. 调用 find_task_by_id(&tasks, id) 定位索引
+  3. 返回 tasks[index].clone()
+错误：
+  - TaskError::NotFound(id)      — 传播自 find_task_by_id
+  - TaskError::AmbiguousId(id)    — 传播自 find_task_by_id
+```
+
+**设计要点：**
+
+- 复用 `find_task_by_id` 的前缀匹配逻辑，与 `delete_task` 的 ID 定位完全一致
+- 返回 `clone` 而非引用，避免生命周期问题（`store.load()` 返回 owned `Vec<Task>`）
+- 仅用于「预览」，不修改数据；实际删除仍走 `delete_task`
+- `delete_task` 内部会再次 `load + find`，存在一次重复读取，但 1000 条量级无性能问题
+
+#### main.rs：确认逻辑
+
+```rust
+Commands::Delete { id, force } => {
+    if !force {
+        // 1. 预览任务，提前暴露 NotFound/AmbiguousId
+        let task = service.get_task_by_id(&id)?;
+        // 2. 确认提示（print_warning：黄色 + ⚠ 前缀）
+        print_warning(&format!(
+            "确认删除任务 \"{}\" ({})？(y/n)",
+            task.title,
+            &task.id[..task.id.len().min(8)]
+        ));
+        // 3. 读取 stdin
+        let mut input = String::new();
+        std::io::stdin().read_line(&mut input)?;
+        // 4. 判定：仅 "y"/"Y" 确认，其余一律取消
+        if input.trim().to_lowercase() != "y" {
+            print_info("已取消删除");
+            return Ok(());
+        }
+    }
+    let deleted = service.delete_task(&id)?;
+    print_success(&format!("已删除任务：{} ({})", deleted.title, deleted.id));
+}
+```
+
+**设计要点：**
+
+- `force: _` 改为 `force`，真正读取标志值
+- 用 `print_warning` 输出确认提示，与 display 输出规范一致（⚠ 前缀 + 黄色）
+- 用 `print_info` 输出取消信息（无前缀无颜色，中性状态）
+- 确认输入仅接受 `"y"`/`"Y"`，`"yes"` 等不确认（与 PRD F9 "输入 y 确认" 一致）
+- `read_line` 返回 `Result`，用 `?` 传播 stdin 读取错误
+- 取消路径 `return Ok(())`，退出码 0（用户主动取消不算错误）
+
+#### 边界处理
+
+| 场景                    | 处理                                            | 输出                              |
+| ----------------------- | ----------------------------------------------- | --------------------------------- |
+| `--force` / `-f`        | 跳过确认，直接删除                              | `✓ 已删除任务：...`               |
+| 输入 `y` / `Y`          | 确认删除                                        | `✓ 已删除任务：...`               |
+| 输入 `n` / 其他         | 取消                                            | `已取消删除`                      |
+| stdin EOF（管道无输入） | `read_line` 返回 0 字节，input 为空，判定为取消 | `已取消删除`                      |
+| ID 不存在               | `get_task_by_id` 返回 `NotFound` → `?` 上抛     | `✗ 错误：任务不存在：<id>`        |
+| ID 多义                 | `get_task_by_id` 返回 `AmbiguousId` → `?` 上抛  | `✗ 错误：ID 匹配到多个任务：<id>` |
+
+#### 测试计划
+
+T3.1 为交互式功能，以集成测试（`assert_cmd`）验证，通过管道喂入 stdin：
+
+| 测试场景           | 命令                  | stdin  | 期望                                      |
+| ------------------ | --------------------- | ------ | ----------------------------------------- |
+| 确认删除           | `delete <id>`         | `y\n`  | 退出 0，stdout 含「已删除任务」           |
+| 取消删除           | `delete <id>`         | `n\n`  | 退出 0，stdout 含「已取消删除」，任务仍在 |
+| 强制删除           | `delete <id> --force` | （无） | 退出 0，stdout 含「已删除任务」           |
+| 强制删除（短选项） | `delete <id> -f`      | （无） | 同上                                      |
+| ID 不存在 + 确认   | `delete xx`           | `y\n`  | 退出 1，stderr 含「任务不存在」           |
+| 管道 EOF           | `delete <id>`         | （空） | 退出 0，stdout 含「已取消删除」           |
+
+> stdin 注入方式：`assert_cmd` 的 `.write_stdin("y\n")` 方法
 
 ---
 
