@@ -20,6 +20,6 @@ pub enum TaskError {
     #[error("数据文件读取失败: {0}")]
     StoreLoadError(#[from] std::io::Error),
 
-    #[error("数据解析失败: {0}")]
-    ParseError(#[from] serde_json::Error),
+    #[error("不支持的导出格式: {0}")]
+    UnSupportFormat(String),
 }

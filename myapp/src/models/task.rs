@@ -97,3 +97,40 @@ mod tests {
         );
     }
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TaskCsvRow {
+    #[serde(rename = "ID")]
+    pub id: String,
+    #[serde(rename = "标题")]
+    pub title: String,
+    #[serde(rename = "描述")]
+    pub description: String,
+    #[serde(rename = "状态")]
+    pub status: String,
+    #[serde(rename = "优先级")]
+    pub priority: String,
+    #[serde(rename = "标签")]
+    pub tags: String,
+    #[serde(rename = "截止日期")]
+    pub due_date: String,
+    #[serde(rename = "创建时间")]
+    pub created_at: String,
+    #[serde(rename = "更新时间")]
+    pub updated_at: String,
+}
+impl From<&Task> for TaskCsvRow {
+    fn from(t: &Task) -> Self {
+        TaskCsvRow {
+            id: t.id.clone(),
+            title: t.title.clone(),
+            description: t.description.clone().unwrap_or_default(),
+            status: t.status.to_string(),
+            priority: t.priority.to_string(),
+            tags: t.tags.join(";"),
+            due_date: t.due_date.map_or(String::new(), |d| d.to_string()),
+            created_at: t.created_at.to_rfc3339(),
+            updated_at: t.updated_at.to_rfc3339(),
+        }
+    }
+}

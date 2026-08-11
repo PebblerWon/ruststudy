@@ -97,9 +97,18 @@ fn run() -> Result<()> {
             let task_stats = service.get_stats()?;
             print_stats(&task_stats);
         }
-        // 阶段二/三实现
-        Commands::Export { .. } => {
-            anyhow::bail!("该命令将在后续阶段实现");
+        Commands::Export { format, output } => {
+            let csv_data = service.export_tasks(&format)?;
+            match output {
+                Some(path) => {
+                    std::fs::write(&path, csv_data.as_bytes())
+                        .with_context(|| format!("写入文件失败：{}", path))?;
+                    print_success(&format!("已导出任务到{}", path));
+                }
+                None => {
+                    print!("{csv_data}");
+                }
+            }
         }
     }
     Ok(())

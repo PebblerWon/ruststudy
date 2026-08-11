@@ -129,18 +129,20 @@ taskflow stats
 
 ### 任务清单
 
-- [ ] **T3.1 删除确认**
+- [x] **T3.1 删除确认** ✅
   - 删除前交互式确认提示
   - 支持 `--force` 跳过确认
   - **产出：** 防误删机制
   - **技术方案：** 见 [TECH_SOLUTION.md § 4.8 删除确认流程](docs/TECH_SOLUTION.md)
   - **实现要点：** `service.rs` 新增 `get_task_by_id()` 供确认前预览任务标题；`main.rs` 读取 `--force` 标志，无 `--force` 时读 stdin 判定 y/n；确认提示用 `print_warning`，取消用 `print_info`
 
-- [ ] **T3.2 CSV 导出**
-  - 新增 `export` 子命令
+- [x] **T3.2 CSV 导出** ✅
+  - 新增 `export` 子命令（CLI 已定义 `Commands::Export`，当前 main.rs 为 stub）
   - 使用 `csv` crate 导出
   - 支持 `-o` 指定输出文件
   - **产出：** `taskflow export -o tasks.csv` 可用
+  - **技术方案：** 见 [TECH_SOLUTION.md § 4.3 export_tasks()](docs/TECH_SOLUTION.md)
+  - **实现要点：** `models/task.rs` 新增 `TaskCsvRow`（逐字段 `#[serde(rename)]` 中文表头 + derive `Serialize/Deserialize`，tags 用 `;` 拼接，`Option` 转空串，`DateTime` 转 RFC 3339）；`service.rs` `export_tasks()` 用 `has_headers(true)` 自动写表头 + 前缀 BOM；`main.rs` `-o` 写文件 + `print_success`，无 `-o` 直接 `print!`；单元测试用 `csv::Reader` 反向 deserialize 校验列值（含 `updated_at` 防回归）
 
 - [ ] **T3.3 错误处理优化**
   - 定义 `TaskError` 枚举（使用 `thiserror`）
@@ -191,8 +193,8 @@ taskflow --help               # 帮助信息完整
 | T2.2 | ✅ 已完成 | 2026-08-09 | 2026-08-09 | search_task：大小写不敏感 + 单元测试             |
 | T2.3 | ✅ 已完成 | 2026-08-09 | 2026-08-09 | display.rs + main.rs 接入，print_warning 待 T3.4 |
 | T2.4 | ✅ 已完成 | 2026-08-10 | 2026-08-10 | TaskStats + get_stats + print_stats + 边界测试   |
-| T3.1 | ⬜ 待开始 |            |            |                                                  |
-| T3.2 | ⬜ 待开始 |            |            |                                                  |
+| T3.1 | ✅ 已完成 | 2026-08-10 | 2026-08-10 | get_task_by_id + 确认流程 + --force              |
+| T3.2 | ✅ 已完成 | 2026-08-11 | 2026-08-11 | TaskCsvRow + export_tasks + csv::Reader 测试     |
 | T3.3 | ⬜ 待开始 |            |            |                                                  |
 | T3.4 | ⬜ 待开始 |            |            |                                                  |
 | T3.5 | ⬜ 待开始 |            |            |                                                  |

@@ -1,6 +1,6 @@
 use crate::{
     error::TaskError,
-    models::{Priority, Status, Task, TaskStats},
+    models::{Priority, Status, Task, TaskCsvRow, TaskStats},
     store::{JsonFileStore, Store},
 };
 use anyhow::{Ok, Result};
@@ -232,18 +232,29 @@ impl TaskService {
 
         Ok(stats)
     }
+    pub fn export_tasks(&self, format: &str) -> Result<String> {
+        if format.to_lowercase() != "csv" {
+            return Err(TaskError::UnSupportFormat(format.to_string()).into());
+        }
+        let tasks = self.store.load()?;
+        let mut wtr = csv::WriterBuilder::new()
+            .has_headers(true)
+            .from_writer(vec![]);
+        for i in tasks.iter() {
+            wtr.serialize(TaskCsvRow::from(i))?;
+        }
+        let a = wtr.into_inner()?;
+        let res = String::from_utf8(a)?;
+        Ok(format!("\u{FEFF}{}", res))
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        assert_eq,
-        fmt::{Debug, Display},
-        vec,
-    };
+    use std::{assert_eq, vec};
 
     use super::*;
-    use crate::{service, store::tests};
+    use crate::store::tests;
     use chrono::{Duration, NaiveDate, TimeZone, Utc};
 
     fn create_temp_services(test_name: &str) -> Result<TaskService> {
@@ -526,6 +537,48 @@ mod tests {
 
         let stats = services.get_stats().unwrap();
         assert_eq!(stats.overdue, 0);
+
+        tests::cleanup(&services.store);
+    }
+
+    #[test]
+    fn test_export() {
+        let services = create_temp_services("test_export").unwrap();
+
+        let a = services.export_tasks("csv").unwrap();
+
+        assert_eq!(a.lines().count(), 1);
+        assert!(a.starts_with("\u{FEFF}"));
+
+        let b = services.export_tasks("json");
+        assert!(b.is_err());
+
+        let t = services
+            .add_task(
+                "title1",
+                None,
+                Some(Priority::High),
+                vec!["tag1", "tag2", "tag3"],
+                None,
+            )
+            .unwrap();
+        let c = services.export_tasks("csv").unwrap();
+        assert_eq!(c.lines().count(), 2);
+
+        let mut lines = c.lines();
+        let l1 = lines.next().unwrap();
+        assert!(l1.starts_with("\u{FEFF}"));
+        assert!(l1.contains("ID,标题,描述,状态,优先级,标签,截止日期,创建时间,更新时间"));
+        let mut rdr = csv::ReaderBuilder::new()
+            .has_headers(true)
+            .from_reader(c.as_bytes());
+        let row: TaskCsvRow = rdr.deserialize().next().unwrap().unwrap();
+
+        assert_eq!(row.description, "");
+        assert_eq!(row.tags, "tag1;tag2;tag3");
+        assert_eq!(row.due_date, "");
+        assert_eq!(row.created_at, t.created_at.to_rfc3339());
+        assert_eq!(row.updated_at, t.updated_at.to_rfc3339());
 
         tests::cleanup(&services.store);
     }

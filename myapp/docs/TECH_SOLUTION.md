@@ -198,6 +198,60 @@ pub struct Task {
 **设计要点：**
 
 - `id` 使用 `String` 存储 UUID，方便 JSON 序列化和用户输入
+
+#### TaskCsvRow — CSV 导出适配结构体
+
+`Task` 的某些字段（`Option<NaiveDate>`、`DateTime<Utc>`、`Vec<String>`、枚举）不能直接序列化为 CSV 单元格，需要适配层：
+
+```rust
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TaskCsvRow {
+    #[serde(rename = "ID")]
+    pub id: String,
+    #[serde(rename = "标题")]
+    pub title: String,
+    #[serde(rename = "描述")]
+    pub description: String,    // Option<String> → 空串表示 None
+    #[serde(rename = "状态")]
+    pub status: String,         // Status::to_string() → "待办"/"进行中"/"已完成"
+    #[serde(rename = "优先级")]
+    pub priority: String,       // Priority::to_string() → "低"/"中"/"高"
+    #[serde(rename = "标签")]
+    pub tags: String,           // Vec<String> → join(";")
+    #[serde(rename = "截止日期")]
+    pub due_date: String,       // Option<NaiveDate> → 空串表示 None
+    #[serde(rename = "创建时间")]
+    pub created_at: String,     // DateTime<Utc> → to_rfc3339()
+    #[serde(rename = "更新时间")]
+    pub updated_at: String,     // DateTime<Utc> → to_rfc3339()
+}
+
+impl From<&Task> for TaskCsvRow {
+    fn from(t: &Task) -> Self {
+        TaskCsvRow {
+            id: t.id.clone(),
+            title: t.title.clone(),
+            description: t.description.clone().unwrap_or_default(),
+            status: t.status.to_string(),
+            priority: t.priority.to_string(),
+            tags: t.tags.join(";"),
+            due_date: t.due_date.map_or(String::new(), |d| d.to_string()),
+            created_at: t.created_at.to_rfc3339(),
+            updated_at: t.updated_at.to_rfc3339(),
+        }
+    }
+}
+```
+
+**设计要点：**
+
+- **与 Task 分离**：不污染 Task 的 serde 定义（JSON 用 snake_case，CSV 需要中文表头和展平字段）
+- **`#[serde(rename = "...")]` 逐字段中文表头**：csv writer 开启 `has_headers(true)` 后自动按 rename 写表头，表头文案与字段顺序只在 `TaskCsvRow` 一处维护，避免手写 `write_record` 与结构体字段双份维护错位
+- **同时 derive `Deserialize`**：测试可用 `csv::Reader::deserialize` 反向解析回 `TaskCsvRow` 断言列值，比裸 `split(",")` 健壮（含逗号/引号的字段会被 csv crate 正确 quoting）
+- **tags 用 `;` 拼接**：避免与 CSV 的 `,` 分隔符冲突（csv crate 会自动给含 `;` 的字段加引号，安全）
+- **`Option` → 空串**：CSV 中空值用空字符串表示，比 `null` 更通用
+- **`DateTime<Utc>` → RFC 3339**：ISO 8601 格式，Excel 和程序均可解析
+- **`From<&Task>` 转换**：借用而非拥有，调用方保留 Task 所有权
 - `Status` 和 `Priority` 使用 `serde(rename_all = "snake_case")` 保证 JSON 可读性
 - `DateTime<Utc>` 统一使用 UTC 时间，避免时区问题
 - 所有字段 `pub`，因为这是数据载体，不需要封装
@@ -353,20 +407,20 @@ pub struct TaskStats {
 
 #### 方法清单
 
-| 方法              | 签名                                                             | 职责                       |
-| ----------------- | ---------------------------------------------------------------- | -------------------------- |
-| `new`             | `() -> Result<Self>`                                             | 构造 service，初始化 store |
-| `add_task`        | `(title, desc, priority, tags, due) -> Result<Task>`             | 创建任务                   |
-| `list_tasks`      | `(status, priority, tag) -> Result<Vec<Task>>`                   | 列出/筛选任务              |
-| `update_task`     | `(id, title, status, priority, desc, tags, due) -> Result<Task>` | 更新任务                   |
-| `delete_task`     | `(id) -> Result<Task>`                                           | 删除任务                   |
-| `search_tasks`    | `(keyword) -> Result<Vec<Task>>`                                 | 搜索任务                   |
-| `get_stats`       | `() -> Result<TaskStats>`                                        | 统计信息                   |
-| `export_tasks`    | `(format, output) -> Result<String>`                             | 导出数据                   |
-| `find_task_by_id` | `(tasks, id) -> Result<usize>`                                   | 内部辅助：按 ID 查找索引   |
-| `get_task_by_id`  | `(id) -> Result<Task>`                                           | 预览任务（供删除确认等）   |
-| `validate_title`  | `(title) -> Result<()>`                                          | 内部辅助：校验标题         |
-| `parse_due_date`  | `(due) -> Result<Option<NaiveDate>>`                             | 内部辅助：解析日期字符串   |
+| 方法              | 签名                                                             | 职责                        |
+| ----------------- | ---------------------------------------------------------------- | --------------------------- |
+| `new`             | `() -> Result<Self>`                                             | 构造 service，初始化 store  |
+| `add_task`        | `(title, desc, priority, tags, due) -> Result<Task>`             | 创建任务                    |
+| `list_tasks`      | `(status, priority, tag) -> Result<Vec<Task>>`                   | 列出/筛选任务               |
+| `update_task`     | `(id, title, status, priority, desc, tags, due) -> Result<Task>` | 更新任务                    |
+| `delete_task`     | `(id) -> Result<Task>`                                           | 删除任务                    |
+| `search_tasks`    | `(keyword) -> Result<Vec<Task>>`                                 | 搜索任务                    |
+| `get_stats`       | `() -> Result<TaskStats>`                                        | 统计信息                    |
+| `export_tasks`    | `(format) -> Result<String>`                                     | 导出数据（返回 CSV 字符串） |
+| `find_task_by_id` | `(tasks, id) -> Result<usize>`                                   | 内部辅助：按 ID 查找索引    |
+| `get_task_by_id`  | `(id) -> Result<Task>`                                           | 预览任务（供删除确认等）    |
+| `validate_title`  | `(title) -> Result<()>`                                          | 内部辅助：校验标题          |
+| `parse_due_date`  | `(due) -> Result<Option<NaiveDate>>`                             | 内部辅助：解析日期字符串    |
 
 #### 方法详细设计
 
@@ -535,15 +589,64 @@ pub struct TaskStats {
 
 ```
 输入：
-  - format: &str             导出格式，当前仅支持 "csv"
-  - output: Option<&str>     输出文件路径，None 则输出到 stdout
-输出：Result<String>         返回导出文件路径或内容
+  - format: &str             导出格式，当前仅支持 "csv"（大小写不敏感）
+输出：Result<String>         返回 CSV 字符串（含 BOM），main.rs 决定写文件还是 stdout
 流程：
-  1. store.load() 加载所有任务
-  2. 使用 csv crate 序列化 tasks 为 CSV 格式
-  3. 若 output 不为 None → 写入文件，返回文件路径
-  4. 若 output 为 None → 返回 CSV 字符串
+  1. 校验 format：format.to_lowercase() != "csv" → anyhow::bail!("不支持的导出格式")
+     - 注意：`anyhow::bail!` 宏自带 `return Err(...)`，外层不能再前置 `return`，否则外层 `return` 的表达式永不被求值，触发 `unreachable_expression` 警告
+  2. store.load() 加载所有任务
+  3. 构造 csv::WriterBuilder::new().has_headers(true).from_writer(Vec<u8>)
+     - has_headers(true)：由 csv crate 按 `TaskCsvRow` 的 `#[serde(rename)]` 自动写中文表头，表头文案与字段顺序仅在结构体一处维护
+     - 空列表也会写出表头行（writer 在首次 serialize 前已 flush 表头）
+  4. 遍历 tasks，wtr.serialize(TaskCsvRow::from(task))
+  5. wtr.into_inner() → Vec<u8> → String::from_utf8() → CSV 字符串
+  6. 前缀加 UTF-8 BOM (\u{FEFF})：format!("\u{FEFF}{}", data)
+     - Excel 靠 BOM 判定 UTF-8 编码，不加 BOM 中文会乱码
+  7. 返回完整 CSV 字符串
+错误：
+  - 不支持的格式 → anyhow::bail!("不支持的导出格式")
+  - CSV 序列化失败 → csv::Error 传播（极少见）
 ```
+
+**设计要点：**
+
+- `output` 参数从 service 移至 main.rs：service 只负责生成 CSV 字符串，I/O（写文件 vs stdout）由 main.rs 决定，保持 service 层无 I/O 副作用
+- `has_headers(true)` + `#[serde(rename)]` 自动写表头：表头文案与字段顺序只在 `TaskCsvRow` 一处维护，避免手写 `write_record` 与结构体字段双份维护错位
+- **UTF-8 BOM** 是 Excel 兼容性的关键：不加 BOM 时 Excel 按系统默认编码（GBK）读取，中文乱码
+- `TaskCsvRow` 适配层与 `Task` 分离，互不影响 serde 定义
+- **`anyhow::bail!` 自带 return**：调用时不能再前置 `return`，否则触发 `unreachable_expression` 警告
+
+**边界处理：**
+
+| 场景                     | 处理                                         | 输出                       |
+| ------------------------ | -------------------------------------------- | -------------------------- |
+| 空任务列表               | 仍然写入表头行                               | CSV 只有表头，无数据行     |
+| `--format json`          | `format.to_lowercase() != "csv"`             | `✗ 错误：不支持的导出格式` |
+| `--format CSV`（大写）   | `to_lowercase()` 归一化                      | 正常导出（大小写不敏感）   |
+| 任务无 tags              | `vec![].join(";")` = `""`                    | 标签列为空串               |
+| 任务无 due_date          | `map_or(String::new())`                      | 截止日期列为空串           |
+| 写文件失败（路径不可写） | `std::fs::write()` 返回 io::Error → `?` 上抛 | `✗ 错误：...`              |
+
+**单元测试覆盖：**
+
+| 场景         | 验证点                                                                                                                                    |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| 空列表       | `lines().count() == 1`，仅 BOM + 表头行，无数据行                                                                                         |
+| 不支持的格式 | `export_tasks("json")` 返回 Err                                                                                                           |
+| 正常导出     | CSV 含 BOM + 表头 + 数据行；用 `csv::Reader`（`has_headers(true)`）喂整段 CSV 反向 deserialize 为 `TaskCsvRow` 断言列值                   |
+| tags 拼接    | 多 tags 任务，`row.tags == "tag1;tag2;tag3"`                                                                                              |
+| Option 空值  | 无 description/due_date，`row.description == ""`、`row.due_date == ""`                                                                    |
+| 时间列       | `row.created_at == t.created_at.to_rfc3339()`、`row.updated_at == t.updated_at.to_rfc3339()`（防回归：曾误把 updated_at 写成 created_at） |
+
+**CSV 输出示例：**
+
+```csv
+﻿ID,标题,描述,状态,优先级,标签,截止日期,创建时间,更新时间
+abc12345,学习Rust,,待办,高,rust;学习,,2026-08-10T10:30:00+00:00,2026-08-10T10:30:00+00:00
+def67890,写文档,需要完成,进行中,中,doc,2026-08-15,2026-08-09T08:00:00+00:00,2026-08-10T14:00:00+00:00
+```
+
+> `﻿` 是 UTF-8 BOM（`\u{FEFF}`），文本编辑器不可见但 Excel 靠它识别编码。
 
 #### 内部辅助方法
 
@@ -957,9 +1060,19 @@ fn run() -> Result<()> {
             let stats = service.get_stats()?;
             print_stats(&stats);
         }
-        // 阶段三实现
-        Commands::Export { .. } => {
-            anyhow::bail!("该命令将在后续阶段实现");
+        Commands::Export { format, output } => {
+            let csv_data = service.export_tasks(&format)?;
+            match output {
+                Some(path) => {
+                    std::fs::write(&path, csv_data.as_bytes())
+                        .with_context(|| format!("写入文件失败: {}", path))?;
+                    print_success(&format!("已导出任务到 {}", path));
+                }
+                None => {
+                    // 直接输出原始 CSV（含 BOM），适合管道重定向
+                    print!("{csv_data}");
+                }
+            }
         }
     }
     Ok(())
@@ -968,15 +1081,15 @@ fn run() -> Result<()> {
 
 #### Dispatch 映射表
 
-| 子命令   | service 方法                                                | 备注                                                 |
-| -------- | ----------------------------------------------------------- | ---------------------------------------------------- |
-| `Add`    | `add_task(title, desc, priority, tags, due)`                | T1.6 已就绪                                          |
-| `List`   | `list_tasks(status, priority, tag)`                         | T1.6 已就绪                                          |
-| `Update` | `update_task(id, title, status, priority, desc, tags, due)` | T1.6 仅传入 cli 提供的字段，未提供的传 `None`        |
-| `Delete` | `get_task_by_id(id)` + `delete_task(id)`                    | T3.1：无 `--force` 时先预览再确认，详见 § 4.8        |
-| `Search` | `search_task(keyword)`                                      | T2.2 已实现：大小写不敏感，命中 title 或 description |
-| `Stats`  | `get_stats()`                                               | T2.4 已实现：TaskStats 统计 + print_stats 展示       |
-| `Export` | （stub）`anyhow::bail!("未实现")`                           | T3.2 实现                                            |
+| 子命令   | service 方法                                                | 备注                                                     |
+| -------- | ----------------------------------------------------------- | -------------------------------------------------------- |
+| `Add`    | `add_task(title, desc, priority, tags, due)`                | T1.6 已就绪                                              |
+| `List`   | `list_tasks(status, priority, tag)`                         | T1.6 已就绪                                              |
+| `Update` | `update_task(id, title, status, priority, desc, tags, due)` | T1.6 仅传入 cli 提供的字段，未提供的传 `None`            |
+| `Delete` | `get_task_by_id(id)` + `delete_task(id)`                    | T3.1：无 `--force` 时先预览再确认，详见 § 4.8            |
+| `Search` | `search_task(keyword)`                                      | T2.2 已实现：大小写不敏感，命中 title 或 description     |
+| `Stats`  | `get_stats()`                                               | T2.4 已实现：TaskStats 统计 + print_stats 展示           |
+| `Export` | `export_tasks(format)` + `std::fs::write()` / `print!`      | T3.2：`-o` 写文件 + `print_success`，无 `-o` 直接 stdout |
 
 #### 输出规范
 
@@ -994,6 +1107,10 @@ fn run() -> Result<()> {
 | 业务错误（TaskError）                 | 经 `?` 上抛到 main → `print_error(&format!("{e:#}"))`      | `✗ 错误：<anyhow chain>`      | stderr |
 | 系统错误（io/json）                   | 同上                                                       | 同上                          | stderr |
 | 输入校验警告（T3.4 启用）             | `print_warning(&format!("⚠ {msg}"))`                       | `⚠ <消息>`                    | stdout |
+| `export -o file` 成功（T3.2）         | `print_success(&format!(...))`                             | `✓ 已导出任务到 <path>`       | stdout |
+| `export`（无 `-o`）输出（T3.2）       | `print!("{csv_data}")`                                     | CSV 原始输出（含 BOM）        | stdout |
+| `export` 写文件失败（T3.2）           | `?` 上抛 → `print_error(...)`                              | `✗ 错误：写入文件失败: ...`   | stderr |
+| `export` 不支持的格式（T3.2）         | `?` 上抛 → `print_error(...)`                              | `✗ 错误：不支持的导出格式`    | stderr |
 
 前缀/颜色约定（display 内部硬编码）：
 
