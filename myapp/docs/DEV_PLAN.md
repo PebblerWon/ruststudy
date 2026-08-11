@@ -144,12 +144,14 @@ taskflow stats
   - **技术方案：** 见 [TECH_SOLUTION.md § 4.3 export_tasks()](docs/TECH_SOLUTION.md)
   - **实现要点：** `models/task.rs` 新增 `TaskCsvRow`（逐字段 `#[serde(rename)]` 中文表头 + derive `Serialize/Deserialize`，tags 用 `;` 拼接，`Option` 转空串，`DateTime` 转 RFC 3339）；`service.rs` `export_tasks()` 用 `has_headers(true)` 自动写表头 + 前缀 BOM；`main.rs` `-o` 写文件 + `print_success`，无 `-o` 直接 `print!`；单元测试用 `csv::Reader` 反向 deserialize 校验列值（含 `updated_at` 防回归）
 
-- [ ] **T3.3 错误处理优化**
+- [x] **T3.3 错误处理优化** ✅
   - 定义 `TaskError` 枚举（使用 `thiserror`）
   - 使用 `anyhow` 在 main 中统一处理
   - 所有错误路径有友好中文/英文提示
   - 消除所有 `unwrap()` 调用
   - **产出：** 无 panic，错误提示友好
+  - **技术方案：** 见 [TECH_SOLUTION.md § 4.9 错误处理优化](docs/TECH_SOLUTION.md)
+  - **实现要点：** `error.rs` 补 `ParseError(serde_json::Error)`/`HomeDirNotFound`，`UnSupportFormat` → `UnsupportedFormat`；`service.rs export_tasks` 从 `bail!` 迁回 `TaskError::UnsupportedFormat`；消除 3 处生产 `unwrap`（`Display::fmt` 用绑定的 `d`、`find_task_by_id` 改 `match`、`update_task` 改 `ok_or_else`）；`store.rs` 删调试 `println!`、`anyhow!` 宏归口 `TaskError`；生产代码 `unwrap`/`expect`/`panic!` 归零，16 个测试全过
 
 - [ ] **T3.4 输入校验完善**
   - 标题长度校验（1~100 字符）
@@ -195,7 +197,7 @@ taskflow --help               # 帮助信息完整
 | T2.4 | ✅ 已完成 | 2026-08-10 | 2026-08-10 | TaskStats + get_stats + print_stats + 边界测试   |
 | T3.1 | ✅ 已完成 | 2026-08-10 | 2026-08-10 | get_task_by_id + 确认流程 + --force              |
 | T3.2 | ✅ 已完成 | 2026-08-11 | 2026-08-11 | TaskCsvRow + export_tasks + csv::Reader 测试     |
-| T3.3 | ⬜ 待开始 |            |            |                                                  |
+| T3.3 | ✅ 已完成 | 2026-08-11 | 2026-08-11 | TaskError 枚举补齐 + 生产 unwrap 归零            |
 | T3.4 | ⬜ 待开始 |            |            |                                                  |
 | T3.5 | ⬜ 待开始 |            |            |                                                  |
 | T3.6 | ⬜ 待开始 |            |            |                                                  |

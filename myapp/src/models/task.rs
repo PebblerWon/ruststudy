@@ -28,7 +28,7 @@ impl fmt::Display for Task {
                     self.priority,
                     self.title,
                     self.status,
-                    self.due_date.unwrap().format("%Y-%m-%d")
+                    d.format("%Y-%m-%d")
                 )
             }
             _ => {

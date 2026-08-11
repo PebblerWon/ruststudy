@@ -954,12 +954,14 @@ fn format_pct(part: usize, total: usize) -> String {
 
 ### 4.6 错误处理 (`error.rs`)
 
+最终枚举（T3.3 落地后的目标形态，迁移方案见 [§ 4.9](#49-错误处理优化对应-t33--prd-f9)）：
+
 ```rust
 use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum TaskError {
-    #[error("任务不存在: {0}")]
+    #[error("任务不存在：{0}")]
     NotFound(String),
 
     #[error("标题不能为空")]
@@ -971,13 +973,21 @@ pub enum TaskError {
     #[error("日期格式错误，请使用 YYYY-MM-DD 格式")]
     InvalidDate,
 
-    #[error("数据文件读取失败: {0}")]
+    #[error("ID 匹配到多个任务：{0}")]
+    AmbiguousId(String),
+
+    #[error("数据文件读取失败：{0}")]
     StoreLoadError(#[from] std::io::Error),
 
-    #[error("数据解析失败: {0}")]
+    #[error("数据解析失败：{0}")]
     ParseError(#[from] serde_json::Error),
+
+    #[error("不支持的导出格式：{0}")]
+    UnsupportedFormat(String),
 }
 ```
+
+> 现有代码命名为 `UnSupportFormat`，T3.3 落地时统一为 `UnsupportedFormat`（驼峰规范），并同步 `service.rs` 引用。
 
 ### 4.7 入口层与端到端串联（`main.rs` —— 对应 DEV_PLAN T1.6）
 
@@ -1134,15 +1144,18 @@ fn run() -> Result<()> {
 - 顶层统一格式：`fn run() -> anyhow::Result<()>`，`main` 只负责 `if let Err` 打印 + `exit(1)`
 - 业务错误经由 `TaskError`（`thiserror`）产生，自动通过 `#[from]` 转为 `anyhow::Error`
 - 退出码：成功 `0`；任何错误路径 `1`（后续可细分，但不强制）
-- `TaskError` 当前已覆盖：
-  - `NotFound(id)` — `update`/`delete` 找不到
+- `TaskError` 覆盖（T3.3 落地后最终形态）：
+  - `NotFound(id)` — `update`/`delete`/`get_task_by_id` 找不到
   - `AmbiguousId(id)` — 前缀匹配命中多条
   - `EmptyTitle` / `TitleTooLong` — `add`/`update` 标题校验
   - `InvalidDate` — `due` 解析失败
-  - `StoreLoadError(io)` / `ParseError(json)` — 存储层兜底
-- 现阶段允许的 `.unwrap()`：
-  - `Uuid::new_v4()`（系统调用，不可能失败）
-  - `Cli::parse()` 之外的 `unwrap` 一律禁止；如有，标记 TODO 等 T3.3 清理
+  - `StoreLoadError(io)` — 存储层 IO 兜底（`#[from] std::io::Error`）
+  - `ParseError(json)` — 存储层 JSON 解析兜底（`#[from] serde_json::Error`，T3.3 新增）
+  - `UnsupportedFormat(fmt)` — `export` 不支持的格式（T3.3 从 `anyhow::bail!` 迁回）
+- 生产代码 `unwrap` 策略（T3.3 落地）：
+  - 非 `#[cfg(test)]` 代码零 `unwrap`/`expect`/`panic!`
+  - 唯一理论例外 `Uuid::new_v4()` 本身返回 `Uuid` 而非 `Result`，无需 unwrap
+  - 残留 `unwrap` 清单与改法见 [§ 4.9](#49-错误处理优化对应-t33--prd-f9)
 
 #### 手动验收脚本
 
@@ -1285,6 +1298,95 @@ T3.1 为交互式功能，以集成测试（`assert_cmd`）验证，通过管道
 | 管道 EOF           | `delete <id>`         | （空） | 退出 0，stdout 含「已取消删除」           |
 
 > stdin 注入方式：`assert_cmd` 的 `.write_stdin("y\n")` 方法
+
+### 4.9 错误处理优化（对应 T3.3 / PRD F9）
+
+#### 现状盘点
+
+| 层               | 现状                                                                                             | 问题                                                                                                   |
+| ---------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
+| `error.rs`       | 已有 `NotFound/EmptyTitle/TitleTooLong/InvalidDate/AmbiguousId/StoreLoadError/UnSupportFormat`   | 缺 `ParseError(serde_json::Error)`，JSON 解析失败经 anyhow 裸传播；命名 `UnSupportFormat` 不符驼峰规范 |
+| `service.rs`     | `export_tasks` 用 `anyhow::bail!("不支持的导出格式")`                                            | 未走 `TaskError::UnsupportedFormat`，绕过 thiserror 归口                                               |
+| `service.rs`     | `find_task_by_id` 末尾 `found.unwrap()`、`update_task` `tasks.get_mut(i).unwrap()`               | 逻辑安全（前置校验），但违背「生产零 unwrap」                                                          |
+| `models/task.rs` | `Display::fmt` 在 `Some(d)` 分支内 `self.due_date.unwrap()`                                      | `d` 已绑定，应直接用 `d`，unwrap 多余                                                                  |
+| `store.rs`       | `load()` 残留 `println!("path exists:...")`；`anyhow!("无法获取父目录")` / `ok_or(anyhow!(...))` | 调试输出未清；错误用 `anyhow!` 宏构造，未归口 TaskError                                                |
+| `main.rs`        | `if let Err(e) = run() { print_error(&format!("{e:#}")); exit(1) }`                              | 已统一，无需改                                                                                         |
+
+#### TaskError 最终枚举
+
+见 [§ 4.6](#46-错误处理-errorrs)，新增 `ParseError(#[from] serde_json::Error)` 与 `UnsupportedFormat(String)`（重命名自 `UnSupportFormat`）。
+
+#### 生产 `unwrap` 消除清单
+
+| 位置                          | 现状                                                     | 改法                                                                                                                               |
+| ----------------------------- | -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `service.rs find_task_by_id`  | `if found.is_none() { Err } else { Ok(found.unwrap()) }` | 重构为 `match found { Some(i) => Ok(i), None => Err(NotFound(id).into()) }`，消除 unwrap                                           |
+| `service.rs update_task`      | `tasks.get_mut(update_index).unwrap()`                   | 推荐：重构 `find_task_by_id` 直接返回 `&mut Task`，根除 panic 路径；或暂用 `.expect("index 已被 find_task_by_id 校验")` 标注不变式 |
+| `models/task.rs Display::fmt` | `Some(d) => ... self.due_date.unwrap().format(...)`      | 直接用绑定的 `d.format("%Y-%m-%d")`，`d` 已是 `NaiveDate`                                                                          |
+| `store.rs load()`             | `println!("path exists:{}", path.exists())`              | 删除调试输出                                                                                                                       |
+
+#### service 层 `anyhow::bail!` → `TaskError` 迁移
+
+```rust
+// export_tasks
+if format.to_lowercase() != "csv" {
+    return Err(TaskError::UnsupportedFormat(format.to_lowercase()).into());
+    // .into() 把 TaskError 转为 anyhow::Error（TaskError: std::error::Error -> anyhow::Error）
+    // 不要写 return anyhow::bail!(...) —— bail! 自带 return，外层再加 return 触发 unreachable_expression 警告
+}
+```
+
+> `TaskError` 经 `#[from]` 与 `impl Error` 自动 `From<TaskError> for anyhow::Error`，service 返回 `anyhow::Result` 时 `?` / `.into()` 均可上抛。
+
+#### store 层错误归口
+
+- `Store` trait 方法签名保持 `anyhow::Result`（底层不强制业务错误类型，io/json 经 `#[from]` 自动转 `TaskError` 再转 `anyhow`）
+- `JsonFileStore::new()` 的 `anyhow!("无法获取父目录")` → 新增 `TaskError::HomeDirNotFound` 变体归口（语义比套 `StoreLoadError` 更准）
+- `save()` 的 `ok_or(anyhow!("无法获取父目录"))` → `ok_or(TaskError::HomeDirNotFound)?`
+- 落地后 `store.rs` 不再出现 `anyhow!` 宏调用
+
+#### main 层统一处理契约
+
+```rust
+fn main() {
+    if let Err(e) = run() {
+        print_error(&format!("{e:#}"));  // {e:#} 用 anyhow alternate Display，打印完整错误链
+        std::process::exit(1);
+    }
+}
+```
+
+- `{e:#}` 渲染：`TaskError` 的 `#[error("...")]` 提供顶层中文消息，`anyhow` 链路自动拼接 context
+- 示例：`export --format json` → `✗ 错误：不支持的导出格式：json`
+- 退出码：成功 `0`；任何错误 `1`
+
+#### 测试 `unwrap` 策略
+
+- **测试代码的 `.unwrap()` 不在消除范围**：测试断言惯用 panic 表失败，`Utc.with_ymd_and_hms().unwrap()`（合法日期）与 `result.unwrap()` 均可接受
+- **生产代码（非 `#[cfg(test)]`）零 `unwrap`/`expect`/`panic!`**，唯一例外 `Uuid::new_v4()`（本身返回 `Uuid` 而非 `Result`，无 unwrap）
+- 落地后用 `grep -rn 'unwrap()\|expect(' src/ --glob '*.rs'` 排除 `#[cfg(test)]` 模块复核
+
+#### 友好提示覆盖
+
+| 错误              | 来源                     | 终端输出                                       |
+| ----------------- | ------------------------ | ---------------------------------------------- |
+| 标题为空          | `EmptyTitle`             | `✗ 错误：标题不能为空`                         |
+| 标题超长          | `TitleTooLong`           | `✗ 错误：标题长度不能超过 100 个字符`          |
+| 日期格式错        | `InvalidDate`            | `✗ 错误：日期格式错误，请使用 YYYY-MM-DD 格式` |
+| 任务不存在        | `NotFound(id)`           | `✗ 错误：任务不存在：<id>`                     |
+| ID 多义           | `AmbiguousId(id)`        | `✗ 错误：ID 匹配到多个任务：<id>`              |
+| 导出格式不支持    | `UnsupportedFormat(fmt)` | `✗ 错误：不支持的导出格式：<fmt>`              |
+| 文件读失败        | `StoreLoadError(io)`     | `✗ 错误：数据文件读取失败：<io>`               |
+| JSON 解析失败     | `ParseError(json)`       | `✗ 错误：数据解析失败：<json>`                 |
+| home 目录获取失败 | `HomeDirNotFound`        | `✗ 错误：无法获取用户主目录`                   |
+
+#### 完成判定（DoD）
+
+- 生产代码（非 test 模块）`unwrap()`/`expect()`/`panic!()` 归零
+- `export_tasks` 错误走 `TaskError::UnsupportedFormat`，不再 `anyhow::bail!`
+- `store.rs` 无 `anyhow!` 宏调用、无调试 `println!`
+- `error.rs` 枚举补齐 `ParseError` + `UnsupportedFormat`（重命名）+ `HomeDirNotFound`
+- `cargo build` 无 warning；`cargo test` 全绿，既有测试不回归
 
 ---
 

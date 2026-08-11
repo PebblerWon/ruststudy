@@ -1,5 +1,6 @@
+use crate::error::TaskError;
 use crate::models::Task;
-use anyhow::{anyhow, Ok, Result};
+use anyhow::{Ok, Result};
 use serde_json::{from_str, to_string_pretty};
 use std::fs::{create_dir_all, read_to_string};
 use std::path::PathBuf;
@@ -23,7 +24,7 @@ impl JsonFileStore {
                 file_path: data_path,
             })
         } else {
-            return Err(anyhow!("无法获取父目录"));
+            return Err(TaskError::HomeDirNotFound.into());
         }
     }
 
@@ -36,7 +37,6 @@ impl JsonFileStore {
 impl Store for JsonFileStore {
     fn load(&self) -> Result<Vec<Task>> {
         let path = &self.file_path;
-        println!("path exists:{}", path.exists());
         if path.exists() {
             let str = read_to_string(&path)?;
             let b: Vec<Task> = from_str(&str)?;
@@ -50,7 +50,7 @@ impl Store for JsonFileStore {
         let back_path = self
             .file_path
             .parent()
-            .ok_or(anyhow!("无法获取父目录"))?
+            .ok_or(TaskError::HomeDirNotFound)?
             .join("data.json.bak");
         if self.file_path.exists() {
             std::fs::copy(&self.file_path, &back_path)?;
@@ -66,10 +66,9 @@ impl Store for JsonFileStore {
 #[cfg(test)]
 pub mod tests {
     use crate::models::{Priority, Status, Task};
-    use crate::store::{self, JsonFileStore, Store};
-    use chrono::{NaiveDate, TimeZone, Utc};
-    use std::path::PathBuf;
-    use std::{fs, result};
+    use crate::store::{JsonFileStore, Store};
+    use chrono::{TimeZone, Utc};
+    use std::fs;
 
     pub fn mock_task(id: &str) -> Task {
         Task {

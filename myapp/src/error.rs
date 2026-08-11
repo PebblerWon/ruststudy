@@ -14,12 +14,18 @@ pub enum TaskError {
     #[error("日期格式错误，请使用 YYYY-MM-DD 格式")]
     InvalidDate,
 
-    #[error("ID 匹配到多个任务: {0}")]
+    #[error("ID 匹配到多个任务：{0}")]
     AmbiguousId(String),
 
-    #[error("数据文件读取失败: {0}")]
+    #[error("数据文件读取失败：{0}")]
     StoreLoadError(#[from] std::io::Error),
 
-    #[error("不支持的导出格式: {0}")]
-    UnSupportFormat(String),
+    #[error("数据解析失败：{0}")]
+    ParseError(#[from] serde_json::Error),
+
+    #[error("不支持的导出格式：{0}")]
+    UnsupportedFormat(String),
+
+    #[error("无法获取父目录")]
+    HomeDirNotFound,
 }

@@ -53,10 +53,9 @@ impl TaskService {
                 }
             }
         }
-        if found.is_none() {
-            return Err(TaskError::NotFound(id.to_string()).into());
-        } else {
-            return Ok(found.unwrap());
+        match found {
+            Some(f) => Ok(f),
+            None => Err(TaskError::NotFound(id.to_string()).into()),
         }
     }
     pub fn get_task_by_id(&self, id: &str) -> Result<Task> {
@@ -148,7 +147,9 @@ impl TaskService {
         let mut tasks = self.store.load()?;
         let update_index = Self::find_task_by_id(&tasks, id)?;
 
-        let update_item = tasks.get_mut(update_index).unwrap();
+        let update_item = tasks
+            .get_mut(update_index)
+            .ok_or_else(|| TaskError::NotFound(id.to_string()))?;
         if let Some(t) = title {
             Self::validate_title(t)?;
             update_item.title = t.to_string();
@@ -234,7 +235,7 @@ impl TaskService {
     }
     pub fn export_tasks(&self, format: &str) -> Result<String> {
         if format.to_lowercase() != "csv" {
-            return Err(TaskError::UnSupportFormat(format.to_string()).into());
+            return Err(TaskError::UnsupportedFormat(format.to_string()).into());
         }
         let tasks = self.store.load()?;
         let mut wtr = csv::WriterBuilder::new()
