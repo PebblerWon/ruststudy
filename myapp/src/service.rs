@@ -43,21 +43,20 @@ impl TaskService {
     }
 
     pub fn find_task_by_id(tasks: &Vec<Task>, id: &str) -> Result<usize> {
-        let s = tasks.iter().position(|t| t.id.starts_with(id));
-        let mut p: Option<usize> = None;
+        let mut found: Option<usize> = None;
         for (i, v) in tasks.iter().enumerate() {
             if v.id.starts_with(id) {
-                if p.is_some() {
+                if found.is_some() {
                     return Err(TaskError::AmbiguousId(id.to_string()).into());
                 } else {
-                    p = Some(i);
+                    found = Some(i);
                 }
             }
         }
-        if s.is_none() {
+        if found.is_none() {
             return Err(TaskError::NotFound(id.to_string()).into());
         } else {
-            return Ok(p.unwrap());
+            return Ok(found.unwrap());
         }
     }
     pub fn get_task_by_id(&self, id: &str) -> Result<Task> {
