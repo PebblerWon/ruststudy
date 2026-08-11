@@ -49,6 +49,8 @@ pub enum Commands {
         status: Option<Status>,
         #[arg(long)]
         priority: Option<Priority>,
+        #[arg(short, long, value_delimiter = ',')]
+        tag: Vec<String>,
     },
 
     /// 删除任务

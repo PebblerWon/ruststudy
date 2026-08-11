@@ -25,7 +25,7 @@ impl TaskService {
         if title.is_empty() {
             return Err(TaskError::EmptyTitle.into());
         }
-        if title.len() > 100 {
+        if title.chars().count() > 100 {
             return Err(TaskError::TitleTooLong.into());
         }
         Ok(())
@@ -40,6 +40,14 @@ impl TaskService {
                 Ok(Some(date))
             }
         }
+    }
+
+    pub fn validate_tags(tags: &[&str]) -> Result<()> {
+        let len = tags.len();
+        if len > 10 {
+            return Err(TaskError::TooManyTags.into());
+        }
+        Ok(())
     }
 
     pub fn find_task_by_id(tasks: &Vec<Task>, id: &str) -> Result<usize> {
@@ -72,7 +80,9 @@ impl TaskService {
         due: Option<&str>,
     ) -> Result<Task> {
         Self::validate_title(title)?;
+        Self::validate_tags(&tags)?;
         let due_date = Self::validate_due_date(due)?;
+
         let id = Uuid::new_v4();
         let description = match desc {
             Some(d) => Some(d.to_string()),
@@ -141,7 +151,7 @@ impl TaskService {
         status: Option<Status>,
         priority: Option<Priority>,
         desc: Option<&str>,
-        tags: Option<Vec<String>>,
+        tags: Vec<&str>,
         due: Option<&str>,
     ) -> Result<Task> {
         let mut tasks = self.store.load()?;
@@ -163,8 +173,9 @@ impl TaskService {
         if let Some(d) = desc {
             update_item.description = Some(d.to_string());
         }
-        if let Some(t) = tags {
-            update_item.tags = t;
+        if !tags.is_empty() {
+            Self::validate_tags(&tags)?;
+            update_item.tags = tags.iter().map(|s| s.to_string()).collect();
         }
         if due.is_some() {
             let date = Self::validate_due_date(due)?;
@@ -371,7 +382,7 @@ mod tests {
                 Some(Status::Done),
                 Some(Priority::Low),
                 Some("desc"),
-                Some(vec!["2".to_string(), "3".to_string()]),
+                vec!["2", "3"],
                 Some("2026-12-31"),
             )
             .unwrap();
@@ -466,12 +477,12 @@ mod tests {
                 Some(Status::InProgress),
                 None,
                 None,
-                None,
+                vec![],
                 Some(&yesterdaystr),
             )
             .unwrap();
         services
-            .update_task(&four.id, None, Some(Status::Done), None, None, None, None)
+            .update_task(&four.id, None, Some(Status::Done), None, None, vec![], None)
             .unwrap();
 
         let stats = services.get_stats().unwrap();
@@ -494,7 +505,7 @@ mod tests {
                 Some(Status::Todo),
                 None,
                 None,
-                None,
+                vec![],
                 Some(&todaystr),
             )
             .unwrap();
@@ -503,7 +514,15 @@ mod tests {
         assert_eq!(stats.overdue, 0);
 
         services
-            .update_task(&three.id, None, Some(Status::Todo), None, None, None, None)
+            .update_task(
+                &three.id,
+                None,
+                Some(Status::Todo),
+                None,
+                None,
+                vec![],
+                None,
+            )
             .unwrap();
 
         let stats = services.get_stats().unwrap();
@@ -516,7 +535,7 @@ mod tests {
                 Some(Status::Done),
                 None,
                 None,
-                None,
+                vec![],
                 Some(&yesterdaystr),
             )
             .unwrap();
@@ -531,7 +550,7 @@ mod tests {
                 Some(Status::Todo),
                 None,
                 None,
-                None,
+                vec![],
                 Some(&tomorrowstr),
             )
             .unwrap();
@@ -581,6 +600,82 @@ mod tests {
         assert_eq!(row.created_at, t.created_at.to_rfc3339());
         assert_eq!(row.updated_at, t.updated_at.to_rfc3339());
 
+        tests::cleanup(&services.store);
+    }
+
+    #[test]
+    fn test_validate_title() {
+        // 空标题
+        assert!(TaskService::validate_title("").is_err());
+
+        // 恰好 100 字符
+        let s100: String = "a".repeat(100);
+        assert!(TaskService::validate_title(&s100).is_ok());
+
+        // 101 字符
+        let s101: String = "a".repeat(101);
+        assert!(TaskService::validate_title(&s101).is_err());
+
+        // 34 个中文字符 = 102 字节，验证按字符数而非字节数
+        let s_cn = "中".repeat(34);
+        assert_eq!(s_cn.len(), 102);
+        assert!(TaskService::validate_title(&s_cn).is_ok());
+    }
+
+    #[test]
+    fn test_validate_due_date() {
+        // None
+        assert!(TaskService::validate_due_date(None).unwrap().is_none());
+
+        // 合法日期
+        let d = TaskService::validate_due_date(Some("2026-08-15")).unwrap();
+        assert_eq!(d, Some(NaiveDate::from_ymd_opt(2026, 8, 15).unwrap()));
+
+        // 非法格式
+        assert!(TaskService::validate_due_date(Some("2026/08/15")).is_err());
+
+        // 不存在的日期
+        assert!(TaskService::validate_due_date(Some("2026-02-30")).is_err());
+
+        // 纯乱码
+        assert!(TaskService::validate_due_date(Some("invalid")).is_err());
+    }
+
+    #[test]
+    fn test_validate_tags() {
+        // 0 条
+        assert!(TaskService::validate_tags(&[]).is_ok());
+
+        // 恰好 10 条
+        let ten: Vec<&str> = vec!["t"; 10];
+        assert!(TaskService::validate_tags(&ten).is_ok());
+
+        // 11 条
+        let eleven: Vec<&str> = vec!["t"; 11];
+        assert!(TaskService::validate_tags(&eleven).is_err());
+    }
+
+    #[test]
+    fn test_add_task_too_many_tags() {
+        let services = create_temp_services("service_add_too_many_tags").unwrap();
+        let eleven: Vec<String> = vec!["t".to_string(); 11];
+        let tags: Vec<&str> = eleven.iter().map(String::as_str).collect();
+        let r = services.add_task("test", None, None, tags, None);
+        assert!(r.is_err());
+        tests::cleanup(&services.store);
+    }
+
+    #[test]
+    fn test_update_task_too_many_tags() {
+        let services = create_temp_services("service_update_too_many_tags").unwrap();
+        let mock_data = mock_tasks();
+        let _ = services.store.save(&mock_data);
+
+        let update_id = &mock_data[0].id;
+        let eleven: Vec<String> = vec!["t".to_string(); 11];
+        let tags: Vec<&str> = eleven.iter().map(String::as_str).collect();
+        let r = services.update_task(update_id, None, None, None, None, tags, None);
+        assert!(r.is_err());
         tests::cleanup(&services.store);
     }
 }

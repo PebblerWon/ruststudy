@@ -153,11 +153,12 @@ taskflow stats
   - **技术方案：** 见 [TECH_SOLUTION.md § 4.9 错误处理优化](docs/TECH_SOLUTION.md)
   - **实现要点：** `error.rs` 补 `ParseError(serde_json::Error)`/`HomeDirNotFound`，`UnSupportFormat` → `UnsupportedFormat`；`service.rs export_tasks` 从 `bail!` 迁回 `TaskError::UnsupportedFormat`；消除 3 处生产 `unwrap`（`Display::fmt` 用绑定的 `d`、`find_task_by_id` 改 `match`、`update_task` 改 `ok_or_else`）；`store.rs` 删调试 `println!`、`anyhow!` 宏归口 `TaskError`；生产代码 `unwrap`/`expect`/`panic!` 归零，16 个测试全过
 
-- [ ] **T3.4 输入校验完善**
+- [x] **T3.4 输入校验完善** ✅
   - 标题长度校验（1~100 字符）
   - 日期格式校验
   - 标签数量限制（最多 10 个）
   - **产出：** 边界情况处理完善
+  - **实现要点：** `service.rs` 新增 `validate_title`（`chars().count()` 按字符数校验，非字节）、`validate_due_date`（`NaiveDate::parse_from_str` 严格 `%Y-%m-%d`）、`validate_tags`（`&[&str]` 签名，>10 报错）；`add_task`/`update_task` 均接入三个校验；`error.rs` 新增 `TooManyTags` 变体；`cli.rs Update` 补 `--tag` 选项、`main.rs` 转发 `Vec<&str>`；单元测试覆盖标题边界（空/100/101/中文）、日期边界（合法/格式错/不存在日期）、标签边界（0/10/11）及 add/update 拒绝路径
 
 - [ ] **T3.5 集成测试**
   - 使用 `assert_cmd` 编写 CLI 集成测试
@@ -198,7 +199,7 @@ taskflow --help               # 帮助信息完整
 | T3.1 | ✅ 已完成 | 2026-08-10 | 2026-08-10 | get_task_by_id + 确认流程 + --force              |
 | T3.2 | ✅ 已完成 | 2026-08-11 | 2026-08-11 | TaskCsvRow + export_tasks + csv::Reader 测试     |
 | T3.3 | ✅ 已完成 | 2026-08-11 | 2026-08-11 | TaskError 枚举补齐 + 生产 unwrap 归零            |
-| T3.4 | ⬜ 待开始 |            |            |                                                  |
+| T3.4 | ✅ 已完成 | 2026-08-11 | 2026-08-11 | validate_title/due_date/tags + 边界测试          |
 | T3.5 | ⬜ 待开始 |            |            |                                                  |
 | T3.6 | ⬜ 待开始 |            |            |                                                  |
 

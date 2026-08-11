@@ -28,4 +28,7 @@ pub enum TaskError {
 
     #[error("无法获取父目录")]
     HomeDirNotFound,
+
+    #[error("最多支持10条标签")]
+    TooManyTags,
 }

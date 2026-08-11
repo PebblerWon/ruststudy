@@ -58,9 +58,12 @@ fn run() -> Result<()> {
             title,
             status,
             priority,
+            tag,
         } => {
+            let tags: Vec<&str> = tag.iter().map(String::as_str).collect();
+
             let task =
-                service.update_task(&id, title.as_deref(), status, priority, None, None, None)?;
+                service.update_task(&id, title.as_deref(), status, priority, None, tags, None)?;
             print_success(&format!("任务已更新：{}", task));
         }
         Commands::Delete { id, force } => {
