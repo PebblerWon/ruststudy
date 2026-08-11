@@ -1390,6 +1390,175 @@ fn main() {
 
 ---
 
+### 4.10 集成测试（对应 T3.5）
+
+#### 现状盘点
+
+| 项                     | 现状                                                                                       |
+| ---------------------- | ------------------------------------------------------------------------------------------ |
+| `tests/cli_test.rs`    | 空文件                                                                                     |
+| dev-dependencies       | `assert_cmd 2.x` / `predicates 3.x` / `tempfile 3.x` 已配置                                |
+| `JsonFileStore::new()` | 硬编码 `dirs::home_dir().join(".taskflow")`，无法从外部覆盖                                |
+| 单元测试               | 通过 `with_path()` 注入临时路径，集成测试调用真实二进制走 `new()`                          |
+| 错误输出去向           | `print_error` 用 `eprintln!` → stderr；`print_success`/`print_info` 用 `println!` → stdout |
+| 退出码                 | 成功 `0`，失败 `1`（`std::process::exit(1)`）                                              |
+
+#### 关键改造：`TASKFLOW_DATA_DIR` 环境变量
+
+集成测试通过 `assert_cmd::Command::cargo_bin` 调用真实二进制，走 `JsonFileStore::new()` → `dirs::home_dir()` → `~/.taskflow/data.json`。若不隔离，测试会**污染真实用户数据**。
+
+`new()` 需支持从环境变量覆盖数据目录：
+
+```rust
+pub fn new() -> Result<JsonFileStore> {
+    let data_dir = std::env::var("TASKFLOW_DATA_DIR")
+        .map(PathBuf::from)
+        .or_else(|_| dirs::home_dir().ok_or(TaskError::HomeDirNotFound))
+        .map(|d| d.join(".taskflow"))?;
+    create_dir_all(&data_dir)?;
+    let data_path = data_dir.join("data.json");
+    Ok(JsonFileStore { file_path: data_path })
+}
+```
+
+- 设置 `TASKFLOW_DATA_DIR` 时，直接作为 `.taskflow` 的父目录
+- 未设置时回退到 `dirs::home_dir()`（原有行为不变）
+- 测试中通过 `Command::env("TASKFLOW_DATA_DIR", temp_dir.path())` 注入临时目录
+
+#### 测试基础设施
+
+```rust
+// tests/cli_test.rs
+use assert_cmd::Command;
+use predicates::prelude::*;
+use tempfile::TempDir;
+
+/// 创建一个注入了临时数据目录的 taskflow Command
+fn taskflow_cmd(temp_dir: &TempDir) -> Command {
+    let mut cmd = Command::cargo_bin("taskflow").unwrap();
+    cmd.env("TASKFLOW_DATA_DIR", temp_dir.path());
+    cmd
+}
+```
+
+每个测试函数独立创建 `TempDir`，测试结束自动清理，互不影响。
+
+#### 测试覆盖矩阵
+
+| 子命令 | 正常路径                    | 断言要点                  | 异常路径                             | 断言要点                             |
+| ------ | --------------------------- | ------------------------- | ------------------------------------ | ------------------------------------ |
+| add    | `add "测试任务"`            | stdout 含"创建成功"       | `add ""`                             | exit 1 + stderr 含"标题不能为空"     |
+| add    | 超长标题（101 字符）        | —                         | exit 1 + stderr 含"标题长度不能超过" |
+| list   | 空数据 `list`               | stdout 含"暂无任务"       | —                                    | —                                    |
+| list   | add 后 `list`               | stdout 含任务标题         | —                                    | —                                    |
+| list   | `list --status done`        | 仅返回已完成              | —                                    | —                                    |
+| update | `update <id> --status done` | stdout 含"已更新"         | `update <bad_id>`                    | exit 1 + stderr 含"任务不存在"       |
+| delete | `delete <id> --force`       | stdout 含"已删除"         | —                                    | —                                    |
+| delete | `delete <id>`（无 --force） | 需 stdin 输入 `y\n`       | —                                    | —                                    |
+| search | add 后 `search "关键字"`    | stdout 含匹配结果         | `search "不存在"`                    | stdout 含"未找到匹配任务"            |
+| stats  | 空数据 `stats`              | stdout 含"已完成率：0.0%" | —                                    | —                                    |
+| export | `export`                    | stdout 含 BOM + 表头      | `export --format json`               | exit 1 + stderr 含"不支持的导出格式" |
+| export | `export -o <file>`          | 文件存在 + 含 CSV 内容    | —                                    | —                                    |
+
+#### 关键测试骨架
+
+```rust
+#[test]
+fn test_add_and_list() {
+    let temp = TempDir::new().unwrap();
+    taskflow_cmd(&temp)
+        .arg("add").arg("集成测试任务")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("创建成功"));
+    taskflow_cmd(&temp)
+        .arg("list")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("集成测试任务"));
+}
+
+#[test]
+fn test_add_empty_title() {
+    let temp = TempDir::new().unwrap();
+    taskflow_cmd(&temp)
+        .arg("add").arg("")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("标题不能为空"));
+}
+
+#[test]
+fn test_delete_with_force() {
+    let temp = TempDir::new().unwrap();
+    // 先创建
+    taskflow_cmd(&temp).arg("add").arg("待删除").assert().success();
+    // list 获取 ID（解析 stdout 中的 ID 前缀）
+    let list_output = taskflow_cmd(&temp).arg("list").output().unwrap();
+    let stdout = String::from_utf8_lossy(&list_output.stdout);
+    // 提取 ID 前 8 位（表格第一列）
+    let id = stdout.lines()
+        .find(|l| l.contains("待删除"))
+        .and_then(|l| l.split('|').nth(1))
+        .map(|s| s.trim().to_string())
+        .unwrap();
+    taskflow_cmd(&temp)
+        .arg("delete").arg(&id).arg("--force")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("已删除"));
+}
+
+#[test]
+fn test_export_unsupported_format() {
+    let temp = TempDir::new().unwrap();
+    taskflow_cmd(&temp)
+        .arg("export").arg("--format").arg("json")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("不支持的导出格式"));
+}
+```
+
+#### delete 交互测试策略
+
+`delete` 无 `--force` 时从 stdin 读取确认。`assert_cmd` 支持写 stdin：
+
+```rust
+use std::io::Write;
+
+#[test]
+fn test_delete_confirm_y() {
+    let temp = TempDir::new().unwrap();
+    // ... 创建任务、获取 ID ...
+    let mut cmd = taskflow_cmd(&temp);
+    cmd.arg("delete").arg(&id);
+    cmd.stdin("y\n");  // assert_cmd 2.x: 通过 stdin pipe 写入
+    cmd.assert()
+        .success()
+        .stdout(predicate::str::contains("已删除"));
+}
+```
+
+若 `assert_cmd` 版本的 stdin API 有差异，可用 `.write_stdin("y\n")` 替代。
+
+#### 注意事项
+
+- **exit code 断言**：`.success()` 断言 exit 0，`.failure()` 断言 exit ≠ 0；`assert_cmd` 的 `failure()` 不限定具体退出码
+- **stdout vs stderr**：成功路径输出在 stdout（`print_success`/`print_info`/表格），错误路径输出在 stderr（`print_error` → `eprintln!`）
+- **delete ID 提取**：`print_task_table` 输出的 ID 列是前 8 位截断，测试需从 stdout 解析；也可先 `list` 再从输出中正则提取
+- **tempfile 自动清理**：`TempDir` drop 时自动删除目录，无需手动 cleanup
+- **测试间隔离**：每个测试函数独立创建 `TempDir`，不共享数据文件
+
+#### 完成判定（DoD）
+
+- `JsonFileStore::new()` 支持 `TASKFLOW_DATA_DIR` 环境变量覆盖
+- `tests/cli_test.rs` 覆盖上表所有正常 + 异常路径
+- `cargo test`（单元 + 集成）全部通过
+- 集成测试不污染真实 `~/.taskflow/data.json`
+
+---
+
 ## 5. 关键技术点说明
 
 ### 5.1 为什么选 JSON 而不是 SQLite？
@@ -1431,26 +1600,13 @@ fn main() {
 
 ### 6.2 集成测试
 
-```rust
-// tests/cli_test.rs
-use assert_cmd::Command;
-use predicates::prelude::*;
-
-#[test]
-fn test_add_and_list() {
-    let mut cmd = Command::cargo_bin("taskflow").unwrap();
-    cmd.arg("add").arg("测试任务")
-       .assert()
-       .success()
-       .stdout(predicate::str::contains("创建成功"));
-}
-```
+详见 [§ 4.10 集成测试](#410-集成测试对应-t35)，包含 `TASKFLOW_DATA_DIR` 环境变量改造、测试覆盖矩阵、完整测试骨架。
 
 ### 6.3 测试数据隔离
 
-- 使用 `tempfile` 创建临时目录
-- 通过环境变量 `TASKFLOW_DATA_DIR` 覆盖默认路径
-- 每个测试独立，互不影响
+- 使用 `tempfile::TempDir` 创建临时目录
+- 通过环境变量 `TASKFLOW_DATA_DIR` 覆盖 `JsonFileStore::new()` 的数据路径
+- 每个测试函数独立创建 `TempDir`，drop 时自动清理，互不影响
 
 ---
 

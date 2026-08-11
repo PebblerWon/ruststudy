@@ -165,6 +165,8 @@ taskflow stats
   - 覆盖所有子命令的正常和异常路径
   - 使用临时目录隔离测试数据
   - **产出：** `tests/cli_test.rs`，`cargo test` 全部通过
+  - **技术方案：** 见 [TECH_SOLUTION.md § 4.10 集成测试](docs/TECH_SOLUTION.md)
+  - **实现要点：** `JsonFileStore::new()` 增加 `TASKFLOW_DATA_DIR` 环境变量覆盖；`tests/cli_test.rs` 用 `taskflow_cmd` helper 注入 `TempDir`；覆盖 add/list/update/delete(--force + 确认)/search/stats/export 正常+异常路径；成功输出走 stdout、错误走 stderr（`print_error` 用 `eprintln!`）
 
 - [ ] **T3.6 帮助文档**
   - 为每个子命令添加 `help` 文本

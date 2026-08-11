@@ -16,16 +16,15 @@ pub struct JsonFileStore {
 
 impl JsonFileStore {
     pub fn new() -> Result<JsonFileStore> {
-        if let Some(home_dir) = dirs::home_dir() {
-            let task_dir = home_dir.join(".taskflow");
-            create_dir_all(&task_dir)?;
-            let data_path = task_dir.join("data.json");
-            Ok(JsonFileStore {
-                file_path: data_path,
-            })
-        } else {
-            return Err(TaskError::HomeDirNotFound.into());
-        }
+        let data_dir = std::env::var("TASKFLOW_DATA_DIR")
+            .map(PathBuf::from)
+            .or_else(|_| dirs::home_dir().ok_or(TaskError::HomeDirNotFound))
+            .map(|d| d.join(".taskflow"))?;
+        create_dir_all(&data_dir)?;
+        let data_path = data_dir.join("data.json");
+        Ok(JsonFileStore {
+            file_path: data_path,
+        })
     }
 
     #[cfg(test)]
