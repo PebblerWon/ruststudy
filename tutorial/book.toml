@@ -1,0 +1,13 @@
+[book]
+authors = ["xyzq"]
+language = "zh"
+multilingual = false
+src = "src"
+title = "Rust 新手实战教程：从零构建 TaskFlow"
+
+[build]
+build-dir = "book"
+
+[output.html]
+git-repository-url = "https://github.com/PebblerWon/"
+edit-url-template = "https://github.com/PebblerWon/ruststudy/edit/main/tutorial/{path}"
