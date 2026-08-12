@@ -207,3 +207,15 @@ fn test_list_is_empty() {
         .success()
         .stdout(predicate::str::contains("暂无任务"));
 }
+
+#[test]
+fn test_help() {
+    let temp = TempDir::new().unwrap();
+    taskflow_cmd(&temp)
+        .arg("--help")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("命令行任务管理工具"))
+        .stdout(predicate::str::contains("使用示例"))
+        .stdout(predicate::str::contains("taskflow add"));
+}

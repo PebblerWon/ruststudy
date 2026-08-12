@@ -1525,22 +1525,18 @@ fn test_export_unsupported_format() {
 `delete` 无 `--force` 时从 stdin 读取确认。`assert_cmd` 支持写 stdin：
 
 ```rust
-use std::io::Write;
-
 #[test]
 fn test_delete_confirm_y() {
     let temp = TempDir::new().unwrap();
     // ... 创建任务、获取 ID ...
     let mut cmd = taskflow_cmd(&temp);
     cmd.arg("delete").arg(&id);
-    cmd.stdin("y\n");  // assert_cmd 2.x: 通过 stdin pipe 写入
+    let _ = cmd.write_stdin("y\n");  // assert_cmd 2.x: 通过 stdin pipe 写入
     cmd.assert()
         .success()
         .stdout(predicate::str::contains("已删除"));
 }
 ```
-
-若 `assert_cmd` 版本的 stdin API 有差异，可用 `.write_stdin("y\n")` 替代。
 
 #### 注意事项
 
@@ -1556,6 +1552,197 @@ fn test_delete_confirm_y() {
 - `tests/cli_test.rs` 覆盖上表所有正常 + 异常路径
 - `cargo test`（单元 + 集成）全部通过
 - 集成测试不污染真实 `~/.taskflow/data.json`
+
+---
+
+### 4.11 帮助文档（对应 T3.6）
+
+#### 现状盘点
+
+| 层级               | 现状                                         | 缺失                                                                                     |
+| ------------------ | -------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| 顶层 `Cli`         | `about = "命令行任务管理工具"` ✅            | 缺 `long_about`（详细描述）、缺 `after_help`（使用示例）                                 |
+| 子命令 doc comment | 7 个子命令均有 `///`（如 `///创建新任务`）✅ | 描述过于简短（1~4 字），缺多行说明                                                       |
+| 位置参数 help      | `Add.title` 有 `/// 任务标题` ✅             | `Update.id`、`Delete.id`、`Search.keyword` 缺 doc comment                                |
+| 可选参数 help      | 全部缺失 ❌                                  | `description`/`priority`/`tag`/`due`/`status`/`force`/`format`/`output` 均无 doc comment |
+| 使用示例           | 无                                           | 无 `after_help`/`before_help`/`long_about` 示例段                                        |
+
+#### clap help 机制
+
+clap derive 模式通过 **doc comment** 自动生成 help 文本：
+
+| clap 属性                          | 对应 help 输出                     | 用途                               |
+| ---------------------------------- | ---------------------------------- | ---------------------------------- |
+| `about`                            | `taskflow --help` 顶部一行简介     | 简短描述（≤1 行）                  |
+| `long_about`                       | `taskflow --help` 顶部多行描述     | 详细说明（换行后展开）             |
+| `after_help`                       | `taskflow --help` 底部追加         | 使用示例、提示信息                 |
+| `/// doc comment` on variant/field | `taskflow add --help` 参数说明     | 子命令/参数的一行描述              |
+| `///` 多行 doc comment             | `taskflow add --help` 展开详细说明 | 多行说明（第一行简述，空行后展开） |
+
+#### 改造清单
+
+**顶层 `Cli`：**
+
+```rust
+#[derive(Parser)]
+#[command(
+    version,
+    name = "taskflow",
+    about = "命令行任务管理工具",
+    long_about = "TaskFlow —— 轻量级命令行任务管理工具\n\n\
+        支持任务的增删改查、搜索、统计和导出。\n\
+        数据存储在 ~/.taskflow/data.json，使用 UUID 作为任务 ID。",
+    after_help = "使用示例:\n  taskflow add "学习Rust" -p high\n  taskflow list --status todo\n  taskflow update <id> --status done\n  taskflow delete <id> --force\n  taskflow search "Rust"\n  taskflow stats\n  taskflow export -o tasks.csv"
+)]
+pub struct Cli { ... }
+```
+
+**子命令 doc comment 升级：**
+
+| 子命令 | 当前            | 改为                        |
+| ------ | --------------- | --------------------------- |
+| Add    | `///创建新任务` | `/// 创建新任务` （加空格） |
+| List   | `/// 列出任务`  | `/// 列出任务` （保持）     |
+| Update | `/// 更新任务`  | `/// 更新任务` （保持）     |
+| Delete | `/// 删除任务`  | `/// 删除任务` （保持）     |
+| Search | `/// 搜索任务`  | `/// 搜索任务` （保持）     |
+| Stats  | `/// 查看统计`  | `/// 查看统计` （保持）     |
+| Export | `/// 导出数据`  | `/// 导出数据` （保持）     |
+
+**字段 doc comment 补全：**
+
+```rust
+Add {
+    /// 任务标题
+    title: String,
+    /// 任务描述
+    #[arg(short, long)]
+    description: Option<String>,
+    /// 优先级（high/medium/low，默认 medium）
+    #[arg(short, long, default_value = "medium")]
+    priority: Priority,
+    /// 标签（逗号分隔，如 -t rust,study）
+    #[arg(short, long, value_delimiter = ',')]
+    tag: Vec<String>,
+    /// 截止日期（YYYY-MM-DD 格式）
+    #[arg(long)]
+    due: Option<String>,
+}
+
+List {
+    /// 按状态筛选（todo/in_progress/done）
+    #[arg(short, long)]
+    status: Option<Status>,
+    /// 按优先级筛选（high/medium/low）
+    #[arg(short, long)]
+    priority: Option<Priority>,
+    /// 按标签筛选（模糊匹配）
+    #[arg(short, long)]
+    tag: Option<String>,
+}
+
+Update {
+    /// 任务 ID（支持前缀匹配，最少 1 位）
+    id: String,
+    /// 新标题
+    #[arg(long)]
+    title: Option<String>,
+    /// 新状态（todo/in_progress/done）
+    #[arg(long)]
+    status: Option<Status>,
+    /// 新优先级（high/medium/low）
+    #[arg(long)]
+    priority: Option<Priority>,
+    /// 新标签（逗号分隔，替换原有标签）
+    #[arg(short, long, value_delimiter = ',')]
+    tag: Vec<String>,
+}
+
+Delete {
+    /// 任务 ID（支持前缀匹配）
+    id: String,
+    /// 跳过确认提示，直接删除
+    #[arg(short, long)]
+    force: bool,
+}
+
+Search {
+    /// 搜索关键字（匹配标题和描述，大小写不敏感）
+    keyword: String,
+}
+
+Export {
+    /// 导出格式（csv，默认 csv）
+    #[arg(long, default_value = "csv")]
+    format: String,
+    /// 输出文件路径（不指定则输出到终端）
+    #[arg(short, long)]
+    output: Option<String>,
+}
+```
+
+#### 目标输出示例
+
+`taskflow --help`：
+
+```
+TaskFlow —— 轻量级命令行任务管理工具
+
+支持任务的增删改查、搜索、统计和导出。
+数据存储在 ~/.taskflow/data.json，使用 UUID 作为任务 ID。
+
+Usage: taskflow <COMMAND>
+
+Commands:
+  add     创建新任务
+  list    列出任务
+  update  更新任务
+  delete  删除任务
+  search  搜索任务
+  stats   查看统计
+  export  导出数据
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
+
+使用示例:
+  taskflow add "学习Rust" -p high
+  taskflow list --status todo
+  taskflow update <id> --status done
+  taskflow delete <id> --force
+  taskflow search "Rust"
+  taskflow stats
+  taskflow export -o tasks.csv
+```
+
+`taskflow add --help`：
+
+```
+创建新任务
+
+Usage: taskflow add [OPTIONS] <TITLE>
+
+Arguments:
+  <TITLE>  任务标题
+
+Options:
+  -d, --description <DESCRIPTION>  任务描述
+  -p, --priority <PRIORITY>        优先级（high/medium/low，默认 medium） [default: medium]
+  -t, --tag <TAG>                  标签（逗号分隔，如 -t rust,study）
+      --due <DUE>                  截止日期（YYYY-MM-DD 格式）
+  -h, --help                       Print help
+```
+
+#### 完成判定（DoD）
+
+- 顶层 `Cli` 有 `about` + `long_about` + `after_help`（含使用示例）
+- 所有子命令的 doc comment 简明准确
+- 所有位置参数和可选参数有 doc comment
+- `taskflow --help` 输出含简介 + 子命令列表 + 使用示例
+- `taskflow <subcommand> --help` 输出含子命令说明 + 参数说明
+- 集成测试中新增 `test_help` 验证 `taskflow --help` exit 0 + stdout 含关键文案
 
 ---
 

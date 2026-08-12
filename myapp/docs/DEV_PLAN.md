@@ -160,18 +160,20 @@ taskflow stats
   - **产出：** 边界情况处理完善
   - **实现要点：** `service.rs` 新增 `validate_title`（`chars().count()` 按字符数校验，非字节）、`validate_due_date`（`NaiveDate::parse_from_str` 严格 `%Y-%m-%d`）、`validate_tags`（`&[&str]` 签名，>10 报错）；`add_task`/`update_task` 均接入三个校验；`error.rs` 新增 `TooManyTags` 变体；`cli.rs Update` 补 `--tag` 选项、`main.rs` 转发 `Vec<&str>`；单元测试覆盖标题边界（空/100/101/中文）、日期边界（合法/格式错/不存在日期）、标签边界（0/10/11）及 add/update 拒绝路径
 
-- [ ] **T3.5 集成测试**
+- [x] **T3.5 集成测试** ✅
   - 使用 `assert_cmd` 编写 CLI 集成测试
   - 覆盖所有子命令的正常和异常路径
   - 使用临时目录隔离测试数据
   - **产出：** `tests/cli_test.rs`，`cargo test` 全部通过
   - **技术方案：** 见 [TECH_SOLUTION.md § 4.10 集成测试](docs/TECH_SOLUTION.md)
-  - **实现要点：** `JsonFileStore::new()` 增加 `TASKFLOW_DATA_DIR` 环境变量覆盖；`tests/cli_test.rs` 用 `taskflow_cmd` helper 注入 `TempDir`；覆盖 add/list/update/delete(--force + 确认)/search/stats/export 正常+异常路径；成功输出走 stdout、错误走 stderr（`print_error` 用 `eprintln!`）
+  - **实现要点：** `JsonFileStore::new()` 增加 `TASKFLOW_DATA_DIR` 环境变量覆盖；`tests/cli_test.rs` 用 `taskflow_cmd` helper 注入 `TempDir`；覆盖 add/list/update/delete(--force + 确认)/search/stats/export 正常+异常路径；成功输出走 stdout、错误走 stderr（`print_error` 用 `eprintln!`）；`write_stdin` 不加 `.unwrap()`（assert_cmd 2.x `write_stdin` 返回 `&mut Self` 不是 `Result`，`.unwrap()` 会匹配到 `Command::unwrap` 导致二次执行子进程）
 
-- [ ] **T3.6 帮助文档**
+- [x] **T3.6 帮助文档** ✅
   - 为每个子命令添加 `help` 文本
   - 添加使用示例
   - **产出：** `taskflow --help` 信息完整清晰
+  - **技术方案：** 见 [TECH_SOLUTION.md § 4.11 帮助文档](docs/TECH_SOLUTION.md)
+  - **实现要点：** `cli.rs` 顶层补 `long_about` + `after_help`（使用示例）；7 个子命令 doc comment 全覆盖；所有位置参数和可选参数（含 `Update.title`）补全 doc comment；集成测试新增 `test_help` 验证 `taskflow --help` exit 0 + stdout 含关键文案
 
 **阶段三验收：**
 
@@ -186,23 +188,23 @@ taskflow --help               # 帮助信息完整
 
 ## 进度追踪
 
-| 任务 | 状态      | 开始日期   | 完成日期   | 备注                                             |
-| ---- | --------- | ---------- | ---------- | ------------------------------------------------ |
-| T1.1 | ✅ 已完成 | 2026-08-08 | 2026-08-08 | Cargo.toml + 目录结构                            |
-| T1.2 | ✅ 已完成 | 2026-08-08 | 2026-08-08 | Task/Status/Priority + 测试                      |
-| T1.3 | ✅ 已完成 | 2026-08-08 | 2026-08-08 | JsonFileStore + 临时目录测试                     |
-| T1.4 | ✅ 已完成 | 2026-08-08 | 2026-08-08 | clap derive 子命令齐全                           |
-| T1.5 | ✅ 已完成 | 2026-08-08 | 2026-08-08 | TaskService 增删改查 + 校验                      |
-| T1.6 | ✅ 已完成 | 2026-08-09 | 2026-08-09 | main.rs dispatch：Add/List/Update/Delete/Search  |
-| T2.1 | ⬜ 待开始 |            |            |                                                  |
-| T2.2 | ✅ 已完成 | 2026-08-09 | 2026-08-09 | search_task：大小写不敏感 + 单元测试             |
-| T2.3 | ✅ 已完成 | 2026-08-09 | 2026-08-09 | display.rs + main.rs 接入，print_warning 待 T3.4 |
-| T2.4 | ✅ 已完成 | 2026-08-10 | 2026-08-10 | TaskStats + get_stats + print_stats + 边界测试   |
-| T3.1 | ✅ 已完成 | 2026-08-10 | 2026-08-10 | get_task_by_id + 确认流程 + --force              |
-| T3.2 | ✅ 已完成 | 2026-08-11 | 2026-08-11 | TaskCsvRow + export_tasks + csv::Reader 测试     |
-| T3.3 | ✅ 已完成 | 2026-08-11 | 2026-08-11 | TaskError 枚举补齐 + 生产 unwrap 归零            |
-| T3.4 | ✅ 已完成 | 2026-08-11 | 2026-08-11 | validate_title/due_date/tags + 边界测试          |
-| T3.5 | ⬜ 待开始 |            |            |                                                  |
-| T3.6 | ⬜ 待开始 |            |            |                                                  |
+| 任务 | 状态      | 开始日期   | 完成日期   | 备注                                                     |
+| ---- | --------- | ---------- | ---------- | -------------------------------------------------------- |
+| T1.1 | ✅ 已完成 | 2026-08-08 | 2026-08-08 | Cargo.toml + 目录结构                                    |
+| T1.2 | ✅ 已完成 | 2026-08-08 | 2026-08-08 | Task/Status/Priority + 测试                              |
+| T1.3 | ✅ 已完成 | 2026-08-08 | 2026-08-08 | JsonFileStore + 临时目录测试                             |
+| T1.4 | ✅ 已完成 | 2026-08-08 | 2026-08-08 | clap derive 子命令齐全                                   |
+| T1.5 | ✅ 已完成 | 2026-08-08 | 2026-08-08 | TaskService 增删改查 + 校验                              |
+| T1.6 | ✅ 已完成 | 2026-08-09 | 2026-08-09 | main.rs dispatch：Add/List/Update/Delete/Search          |
+| T2.1 | ⬜ 待开始 |            |            |                                                          |
+| T2.2 | ✅ 已完成 | 2026-08-09 | 2026-08-09 | search_task：大小写不敏感 + 单元测试                     |
+| T2.3 | ✅ 已完成 | 2026-08-09 | 2026-08-09 | display.rs + main.rs 接入，print_warning 待 T3.4         |
+| T2.4 | ✅ 已完成 | 2026-08-10 | 2026-08-10 | TaskStats + get_stats + print_stats + 边界测试           |
+| T3.1 | ✅ 已完成 | 2026-08-10 | 2026-08-10 | get_task_by_id + 确认流程 + --force                      |
+| T3.2 | ✅ 已完成 | 2026-08-11 | 2026-08-11 | TaskCsvRow + export_tasks + csv::Reader 测试             |
+| T3.3 | ✅ 已完成 | 2026-08-11 | 2026-08-11 | TaskError 枚举补齐 + 生产 unwrap 归零                    |
+| T3.4 | ✅ 已完成 | 2026-08-11 | 2026-08-11 | validate_title/due_date/tags + 边界测试                  |
+| T3.5 | ✅ 已完成 | 2026-08-11 | 2026-08-12 | TASKFLOW_DATA_DIR + 10 集成测试                          |
+| T3.6 | ✅ 已完成 | 2026-08-12 | 2026-08-12 | long_about + after_help + 全字段 doc comment + test_help |
 
 **状态说明：** ⬜ 待开始 | 🔵 进行中 | ✅ 已完成 | ⏸ 暂停
