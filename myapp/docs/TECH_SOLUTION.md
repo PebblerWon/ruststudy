@@ -407,20 +407,21 @@ pub struct TaskStats {
 
 #### 方法清单
 
-| 方法              | 签名                                                             | 职责                        |
-| ----------------- | ---------------------------------------------------------------- | --------------------------- |
-| `new`             | `() -> Result<Self>`                                             | 构造 service，初始化 store  |
-| `add_task`        | `(title, desc, priority, tags, due) -> Result<Task>`             | 创建任务                    |
-| `list_tasks`      | `(status, priority, tag) -> Result<Vec<Task>>`                   | 列出/筛选任务               |
-| `update_task`     | `(id, title, status, priority, desc, tags, due) -> Result<Task>` | 更新任务                    |
-| `delete_task`     | `(id) -> Result<Task>`                                           | 删除任务                    |
-| `search_tasks`    | `(keyword) -> Result<Vec<Task>>`                                 | 搜索任务                    |
-| `get_stats`       | `() -> Result<TaskStats>`                                        | 统计信息                    |
-| `export_tasks`    | `(format) -> Result<String>`                                     | 导出数据（返回 CSV 字符串） |
-| `find_task_by_id` | `(tasks, id) -> Result<usize>`                                   | 内部辅助：按 ID 查找索引    |
-| `get_task_by_id`  | `(id) -> Result<Task>`                                           | 预览任务（供删除确认等）    |
-| `validate_title`  | `(title) -> Result<()>`                                          | 内部辅助：校验标题          |
-| `parse_due_date`  | `(due) -> Result<Option<NaiveDate>>`                             | 内部辅助：解析日期字符串    |
+| 方法                | 签名                                                             | 职责                        |
+| ------------------- | ---------------------------------------------------------------- | --------------------------- |
+| `new`               | `() -> Result<Self>`                                             | 构造 service，初始化 store  |
+| `add_task`          | `(title, desc, priority, tags, due) -> Result<Task>`             | 创建任务                    |
+| `list_tasks`        | `(status, priority, tag) -> Result<Vec<Task>>`                   | 列出/筛选任务               |
+| `update_task`       | `(id, title, status, priority, desc, tags, due) -> Result<Task>` | 更新任务                    |
+| `delete_task`       | `(id) -> Result<Task>`                                           | 删除任务                    |
+| `search_task`       | `(keyword) -> Result<Vec<Task>>`                                 | 搜索任务                    |
+| `get_stats`         | `() -> Result<TaskStats>`                                        | 统计信息                    |
+| `export_tasks`      | `(format) -> Result<String>`                                     | 导出数据（返回 CSV 字符串） |
+| `find_task_by_id`   | `(tasks, id) -> Result<usize>`                                   | 内部辅助：按 ID 查找索引    |
+| `get_task_by_id`    | `(id) -> Result<Task>`                                           | 预览任务（供删除确认等）    |
+| `validate_title`    | `(title) -> Result<()>`                                          | 内部辅助：校验标题          |
+| `validate_due_date` | `(due: Option<&str>) -> Result<Option<NaiveDate>>`               | 内部辅助：校验+解析日期     |
+| `validate_tags`     | `(tags: &[&str]) -> Result<()>`                                  | 内部辅助：校验标签数量      |
 
 #### 方法详细设计
 
@@ -446,20 +447,22 @@ pub struct TaskStats {
 输出：Result<Task>        返回创建成功的完整 Task
 流程：
   1. 调用 validate_title(title) 校验标题
-  2. 调用 parse_due_date(due) 解析截止日期，格式错误返回 TaskError::InvalidDate
-  3. 生成 UUID v4 作为 id
-  4. 构造 Task：
+  2. 调用 validate_due_date(due) 解析截止日期，格式错误返回 TaskError::InvalidDate
+  3. 调用 validate_tags(tags) 校验标签数量，超 10 个返回 TaskError::TooManyTags
+  4. 生成 UUID v4 作为 id
+  5. 构造 Task：
      - status = Status::Todo
      - created_at = Utc::now()
      - updated_at = Utc::now()
-  5. store.load() 加载现有任务
-  6. 追加新任务到 Vec
-  7. store.save() 保存
-  8. 返回新 Task
+  6. store.load() 加载现有任务
+  7. 追加新任务到 Vec
+  8. store.save() 保存
+  9. 返回新 Task
 错误：
   - TaskError::EmptyTitle        标题为空
   - TaskError::TitleTooLong      标题超 100 字符
   - TaskError::InvalidDate       日期格式错误
+  - TaskError::TooManyTags       标签超过 10 个
 ```
 
 ##### `list_tasks()` — 列出任务（对应 PRD F2）
@@ -488,29 +491,31 @@ pub struct TaskStats {
   - status: Option<Status>      新状态
   - priority: Option<Priority>  新优先级
   - desc: Option<&str>          新描述
-  - tags: Option<Vec<String>>   新标签（覆盖）
+  - tags: Vec<&str>           新标签（覆盖），空 Vec 表示不修改
   - due: Option<&str>           新截止日期
 输出：Result<Task>              返回更新后的 Task
 流程：
   1. store.load() 加载所有任务
   2. 调用 find_task_by_id() 查找目标索引，未找到返回 TaskError::NotFound
   3. 若 title 不为 None，调用 validate_title() 校验
-  4. 若 due 不为 None，调用 parse_due_date() 解析
-  5. 逐字段更新（仅更新 Some 的字段）：
+  4. 若 due 不为 None，调用 validate_due_date() 解析
+  5. 若 tags 不为空，调用 validate_tags() 校验
+  6. 逐字段更新（仅更新 Some 的字段）：
      - title → task.title
      - status → task.status
      - priority → task.priority
      - desc → task.description（Some 设置, None 不修改）
-     - tags → task.tags
+     - tags → task.tags（tags 不为空时覆盖）
      - due → task.due_date
-  6. 更新 task.updated_at = Utc::now()
-  7. store.save() 保存
-  8. 返回更新后的 Task（clone）
+  7. 更新 task.updated_at = Utc::now()
+  8. store.save() 保存
+  9. 返回更新后的 Task（clone）
 错误：
   - TaskError::NotFound(id)      任务不存在
   - TaskError::EmptyTitle        新标题为空
   - TaskError::TitleTooLong      新标题超长
   - TaskError::InvalidDate       日期格式错误
+  - TaskError::TooManyTags       标签超过 10 个
 ```
 
 ##### `delete_task()` — 删除任务（对应 PRD F4）
@@ -529,7 +534,7 @@ pub struct TaskStats {
   - TaskError::NotFound(id)
 ```
 
-##### `search_tasks()` — 搜索任务（对应 PRD F5）
+##### `search_task()` — 搜索任务（对应 PRD F5）
 
 ```
 输入：
@@ -592,8 +597,9 @@ pub struct TaskStats {
   - format: &str             导出格式，当前仅支持 "csv"（大小写不敏感）
 输出：Result<String>         返回 CSV 字符串（含 BOM），main.rs 决定写文件还是 stdout
 流程：
-  1. 校验 format：format.to_lowercase() != "csv" → anyhow::bail!("不支持的导出格式")
-     - 注意：`anyhow::bail!` 宏自带 `return Err(...)`，外层不能再前置 `return`，否则外层 `return` 的表达式永不被求值，触发 `unreachable_expression` 警告
+  1. 校验 format：format.to_lowercase() != "csv" → `return Err(TaskError::UnsupportedFormat(format.to_lowercase()).into())`
+     - 不要用 `anyhow::bail!`：T3.3 已迁移到 `TaskError::UnsupportedFormat`，走 thiserror 归口
+     - 注意：`anyhow::bail!` 宏自带 `return Err(...)`，外层不能再前置 `return`，否则触发 `unreachable_expression` 警告
   2. store.load() 加载所有任务
   3. 构造 csv::WriterBuilder::new().has_headers(true).from_writer(Vec<u8>)
      - has_headers(true)：由 csv crate 按 `TaskCsvRow` 的 `#[serde(rename)]` 自动写中文表头，表头文案与字段顺序仅在结构体一处维护
@@ -604,7 +610,7 @@ pub struct TaskStats {
      - Excel 靠 BOM 判定 UTF-8 编码，不加 BOM 中文会乱码
   7. 返回完整 CSV 字符串
 错误：
-  - 不支持的格式 → anyhow::bail!("不支持的导出格式")
+  - 不支持的格式 → `TaskError::UnsupportedFormat(fmt)` （T3.3 从 `anyhow::bail!` 迁移）
   - CSV 序列化失败 → csv::Error 传播（极少见）
 ```
 
@@ -614,7 +620,7 @@ pub struct TaskStats {
 - `has_headers(true)` + `#[serde(rename)]` 自动写表头：表头文案与字段顺序只在 `TaskCsvRow` 一处维护，避免手写 `write_record` 与结构体字段双份维护错位
 - **UTF-8 BOM** 是 Excel 兼容性的关键：不加 BOM 时 Excel 按系统默认编码（GBK）读取，中文乱码
 - `TaskCsvRow` 适配层与 `Task` 分离，互不影响 serde 定义
-- **`anyhow::bail!` 自带 return**：调用时不能再前置 `return`，否则触发 `unreachable_expression` 警告
+- **错误走 `TaskError::UnsupportedFormat`**（T3.3 从 `anyhow::bail!` 迁移），走 thiserror 归口；注意 `bail!` 宏自带 return，外层不能再前置 `return`
 
 **边界处理：**
 
@@ -661,7 +667,7 @@ def67890,写文档,需要完成,进行中,中,doc,2026-08-15,2026-08-09T08:00:00
   - 否则 → Ok(())
 ```
 
-##### `parse_due_date()` — 日期解析
+##### `validate_due_date()` — 日期校验+解析
 
 ```
 输入：due: Option<&str>
@@ -671,6 +677,16 @@ def67890,写文档,需要完成,进行中,中,doc,2026-08-15,2026-08-09T08:00:00
   - Some(s) → NaiveDate::parse_from_str(s, "%Y-%m-%d")
     - 成功 → Ok(Some(date))
     - 失败 → Err(TaskError::InvalidDate)
+```
+
+##### `validate_tags()` — 标签数量校验
+
+```
+输入：tags: &[&str]
+输出：Result<()>
+规则：
+  - tags.len() > 10 → Err(TaskError::TooManyTags)
+  - 否则 → Ok(())
 ```
 
 ##### `find_task_by_id()` — ID 查找
@@ -690,7 +706,7 @@ def67890,写文档,需要完成,进行中,中,doc,2026-08-15,2026-08-09T08:00:00
 ```rust
 #[derive(Error, Debug)]
 pub enum TaskError {
-    #[error("任务不存在: {0}")]
+    #[error("任务不存在：{0}")]
     NotFound(String),
 
     #[error("标题不能为空")]
@@ -702,22 +718,48 @@ pub enum TaskError {
     #[error("日期格式错误，请使用 YYYY-MM-DD 格式")]
     InvalidDate,
 
-    #[error("ID 匹配到多个任务: {0}")]
+    #[error("ID 匹配到多个任务：{0}")]
     AmbiguousId(String),
 
-    #[error("数据文件读取失败: {0}")]
+    #[error("数据文件读取失败：{0}")]
     StoreLoadError(#[from] std::io::Error),
 
-    #[error("数据解析失败: {0}")]
+    #[error("数据解析失败：{0}")]
     ParseError(#[from] serde_json::Error),
+
+    #[error("不支持的导出格式：{0}")]
+    UnsupportedFormat(String),
+
+    #[error("无法获取父目录")]
+    HomeDirNotFound,
+
+    #[error("最多支持10条标签")]
+    TooManyTags,
 }
 ```
+
+> 最终形态见 [§ 4.6](#46-错误处理-errorrs)，T3.3 新增 `ParseError`/`UnsupportedFormat`/`HomeDirNotFound`，T3.4 新增 `TooManyTags`。
 
 ### 4.4 CLI 定义 (`cli.rs`)
 
 ```rust
 #[derive(Parser)]
-#[command(name = "taskflow", about = "命令行任务管理工具")]
+#[command(
+    version,
+    name = "taskflow",
+    about = "命令行任务管理工具",
+    long_about = "TaskFlow —— 轻量级命令行任务管理工具\n\n\
+        支持任务的增删改查、搜索、统计和导出。\n\
+        数据存储在 ~/.taskflow/data.json，使用 UUID 作为任务 ID。",
+    after_help = r#"使用示例:
+        taskflow add "学习Rust" -p high
+        taskflow list --status todo
+        taskflow update <id> --status done
+        taskflow delete <id> --force
+        taskflow search "Rust"
+        taskflow stats
+        taskflow export -o tasks.csv"#
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
@@ -729,54 +771,84 @@ pub enum Commands {
     Add {
         /// 任务标题
         title: String,
+        /// 任务描述
         #[arg(short, long)]
         description: Option<String>,
+        /// 优先级（high/medium/low，默认 medium）
         #[arg(short, long, default_value = "medium")]
         priority: Priority,
+        /// 标签（逗号分隔，如 -t rust,study）
         #[arg(short, long, value_delimiter = ',')]
         tag: Vec<String>,
+        /// 截止日期（YYYY-MM-DD 格式）
         #[arg(long)]
         due: Option<String>,
     },
+
     /// 列出任务
     List {
+        /// 按状态筛选（todo/in_progress/done）
         #[arg(short, long)]
         status: Option<Status>,
+        /// 按优先级筛选（high/medium/low）
         #[arg(short, long)]
         priority: Option<Priority>,
+        /// 按标签筛选（模糊匹配）
         #[arg(short, long)]
         tag: Option<String>,
     },
+
     /// 更新任务
     Update {
+        /// 任务 ID（支持前缀匹配，最少 1 位）
         id: String,
+        /// 新标题
         #[arg(long)]
         title: Option<String>,
+        /// 新状态（todo/in_progress/done）
         #[arg(long)]
         status: Option<Status>,
-        // ... 其他可选字段
+        /// 新优先级（high/medium/low）
+        #[arg(long)]
+        priority: Option<Priority>,
+        /// 新标签（逗号分隔，替换原有标签）
+        #[arg(short, long, value_delimiter = ',')]
+        tag: Vec<String>,
     },
+
     /// 删除任务
     Delete {
+        /// 任务 ID（支持前缀匹配）
         id: String,
+        /// 跳过确认提示，直接删除
         #[arg(short, long)]
         force: bool,
     },
+
     /// 搜索任务
     Search {
+        /// 搜索关键字（匹配标题和描述，大小写不敏感）
         keyword: String,
     },
+
     /// 查看统计
     Stats,
+
     /// 导出数据
     Export {
+        /// 导出格式（csv，默认 csv）
         #[arg(long, default_value = "csv")]
         format: String,
+        /// 输出文件路径（不指定则输出到终端）
         #[arg(short, long)]
         output: Option<String>,
     },
 }
 ```
+
+> T3.6 补全了 `long_about` + `after_help` + 所有字段 doc comment，详见 [§ 4.11](#411-帮助文档对应-t36)。
+
+> **注意**：`Update` 当前缺 `--description` 和 `--due` 选项（PRD F3 列出但未实现），属已知 gap。
 
 ### 4.5 展示层 (`display.rs`)
 
@@ -947,14 +1019,15 @@ fn format_pct(part: usize, total: usize) -> String {
 - **ID 必须用 `min(8)` 防 panic**：mock 测试数据 id 可能很短（`"1"`、`"2"`），裸切片 `&id[..8]` 会 panic
 - **CJK 字符宽度**：当前默认靠 `Dynamic` 自适应；若发现中文列依然错位（不同终端字体宽度不同），可加 `unicode-width` crate 用 `UnicodeWidthStr` 精确计算
 
-##### `print_warning` 当前无 caller
+##### `print_warning` 已启用
 
-- **T3.4 输入校验完善时启用**（如"标签超过 10 个"等警告）
+- **T3.1 删除确认**已启用（`print_warning` 输出确认提示）
+- **T3.4 输入校验**可进一步使用（如"标签超过 10 个"等警告）
 - 注意：与 `print_success`/`print_error` 不同，警告前缀由调用方按需拼接
 
 ### 4.6 错误处理 (`error.rs`)
 
-最终枚举（T3.3 落地后的目标形态，迁移方案见 [§ 4.9](#49-错误处理优化对应-t33--prd-f9)）：
+最终枚举（T3.3 + T3.4 落地后的实际形态，迁移方案见 [§ 4.9](#49-错误处理优化对应-t33--prd-f9)）：
 
 ```rust
 use thiserror::Error;
@@ -984,10 +1057,16 @@ pub enum TaskError {
 
     #[error("不支持的导出格式：{0}")]
     UnsupportedFormat(String),
+
+    #[error("无法获取父目录")]
+    HomeDirNotFound,
+
+    #[error("最多支持10条标签")]
+    TooManyTags,
 }
 ```
 
-> 现有代码命名为 `UnSupportFormat`，T3.3 落地时统一为 `UnsupportedFormat`（驼峰规范），并同步 `service.rs` 引用。
+> `UnSupportFormat` 已在 T3.3 重命名为 `UnsupportedFormat`（驼峰规范）；`HomeDirNotFound` 由 T3.3 新增；`TooManyTags` 由 T3.4 新增。
 
 ### 4.7 入口层与端到端串联（`main.rs` —— 对应 DEV_PLAN T1.6）
 
@@ -1008,14 +1087,16 @@ use anyhow::{Context, Result};
 use clap::Parser;
 use crate::{
     cli::{Cli, Commands},
-    display::{print_error, print_info, print_stats, print_success, print_task_table},
+    display::{
+        print_error, print_info, print_stats, print_success, print_task_table, print_warning,
+    },
     service::TaskService,
 };
 
 fn main() {
     if let Err(e) = run() {
-        eprintln!("✗ 错误：{e:#}");
-        std::process::exit(1);
+        print_error(&format!("{e:#}"));
+        std::process::exit(1)
     }
 }
 
@@ -1026,60 +1107,64 @@ fn run() -> Result<()> {
     match cli.command {
         Commands::Add { title, description, priority, tag, due } => {
             let tags: Vec<&str> = tag.iter().map(String::as_str).collect();
-            let task = service.add_task(&title, description.as_deref(), Some(priority), tags, due.as_deref())?;
-            println!("✓ 任务创建成功：{}", task);
+            let desc = description.as_deref();
+            let task = service.add_task(&title, desc, Some(priority), tags, due.as_deref())?;
+            print_success(&format!("任务创建成功：{}", task));
         }
         Commands::List { status, priority, tag } => {
             let tasks = service.list_tasks(status, priority, tag.as_deref())?;
             if tasks.is_empty() {
-                println!("暂无任务");
+                print_info("暂无任务");
             } else {
-                for t in &tasks {
-                    println!("{}", t);
-                }
+                print_task_table(&tasks);
             }
         }
-        Commands::Update { id, title, status, priority } => {
-            let task = service.update_task(
-                &id,
-                title.as_deref(),
-                status,
-                priority,
-                None,  // desc
-                None,  // tags
-                None,  // due
-            )?;
-            println!("✓ 任务已更新：{}", task);
+        Commands::Update { id, title, status, priority, tag } => {
+            let tags: Vec<&str> = tag.iter().map(String::as_str).collect();
+            let task =
+                service.update_task(&id, title.as_deref(), status, priority, None, tags, None)?;
+            print_success(&format!("任务已更新：{}", task));
         }
-        Commands::Delete { id, force: _ } => {
+        Commands::Delete { id, force } => {
+            if !force {
+                let task = service.get_task_by_id(&id)?;
+                print_warning(&format!(
+                    "确认删除任务 \"{}\" ({})?(y/n)",
+                    task.title,
+                    &task.id[..task.id.len().min(8)]
+                ));
+                let mut input = String::new();
+                std::io::stdin().read_line(&mut input)?;
+                if input.trim().to_lowercase() != "y" {
+                    print_info("已取消删除");
+                    return Ok(());
+                }
+            }
             let deleted = service.delete_task(&id)?;
-            println!("✓ 已删除任务：{} ({})", deleted.title, deleted.id);
+            print_success(&format!("已删除任务：{} ({})", deleted.title, deleted.id));
         }
         Commands::Search { keyword } => {
-            let res = service.search_task(&keyword)?;
+            let res = service.search_task(keyword.as_str())?;
             if res.is_empty() {
-                println!("未找到匹配任务");
+                print_info("未找到匹配任务");
             } else {
-                println!("✓ 搜索到 {} 条结果：", res.len());
-                for t in &res {
-                    println!("{t}");
-                }
+                println!("搜索到 {} 条结果：", res.len());
+                print_task_table(&res);
             }
         }
         Commands::Stats => {
-            let stats = service.get_stats()?;
-            print_stats(&stats);
+            let task_stats = service.get_stats()?;
+            print_stats(&task_stats);
         }
         Commands::Export { format, output } => {
             let csv_data = service.export_tasks(&format)?;
             match output {
                 Some(path) => {
                     std::fs::write(&path, csv_data.as_bytes())
-                        .with_context(|| format!("写入文件失败: {}", path))?;
-                    print_success(&format!("已导出任务到 {}", path));
+                        .with_context(|| format!("写入文件失败：{}", path))?;
+                    print_success(&format!("已导出任务到{}", path));
                 }
                 None => {
-                    // 直接输出原始 CSV（含 BOM），适合管道重定向
                     print!("{csv_data}");
                 }
             }
@@ -1088,6 +1173,8 @@ fn run() -> Result<()> {
     Ok(())
 }
 ```
+
+> 上述为 T3.1–T3.6 全部落地后的实际代码。T1.6 初始版本的差异：Add/List/Search 用 `println!` 而非 `print_success`/`print_task_table`；Update 不转发 `tag`；Delete 忽略 `force` 且无确认流程。
 
 #### Dispatch 映射表
 
@@ -1137,7 +1224,7 @@ fn run() -> Result<()> {
 > - ~~不引入 `colored` 上色~~ → T2.3 已接入
 > - ~~不使用 `display.rs` 模块~~ → 已接入 main.rs
 > - ~~不实现 `Delete` 的交互确认~~ → T3.1 设计就绪（§ 4.8）
-> - `print_warning` 无 caller → T3.1 删除确认 + T3.4 输入校验启用
+> - `print_warning` 无 caller → T3.1 删除确认已启用，T3.4 输入校验可进一步使用
 
 #### 错误处理收敛
 
@@ -1152,6 +1239,8 @@ fn run() -> Result<()> {
   - `StoreLoadError(io)` — 存储层 IO 兜底（`#[from] std::io::Error`）
   - `ParseError(json)` — 存储层 JSON 解析兜底（`#[from] serde_json::Error`，T3.3 新增）
   - `UnsupportedFormat(fmt)` — `export` 不支持的格式（T3.3 从 `anyhow::bail!` 迁回）
+  - `HomeDirNotFound` — store 获取 home 目录失败（T3.3 新增）
+  - `TooManyTags` — 标签超过 10 个（T3.4 新增）
 - 生产代码 `unwrap` 策略（T3.3 落地）：
   - 非 `#[cfg(test)]` 代码零 `unwrap`/`expect`/`panic!`
   - 唯一理论例外 `Uuid::new_v4()` 本身返回 `Uuid` 而非 `Result`，无需 unwrap
@@ -1378,14 +1467,15 @@ fn main() {
 | 导出格式不支持    | `UnsupportedFormat(fmt)` | `✗ 错误：不支持的导出格式：<fmt>`              |
 | 文件读失败        | `StoreLoadError(io)`     | `✗ 错误：数据文件读取失败：<io>`               |
 | JSON 解析失败     | `ParseError(json)`       | `✗ 错误：数据解析失败：<json>`                 |
-| home 目录获取失败 | `HomeDirNotFound`        | `✗ 错误：无法获取用户主目录`                   |
+| home 目录获取失败 | `HomeDirNotFound`        | `✗ 错误：无法获取父目录`                       |
+| 标签过多          | `TooManyTags`            | `✗ 错误：最多支持10条标签`                     |
 
 #### 完成判定（DoD）
 
 - 生产代码（非 test 模块）`unwrap()`/`expect()`/`panic!()` 归零
 - `export_tasks` 错误走 `TaskError::UnsupportedFormat`，不再 `anyhow::bail!`
 - `store.rs` 无 `anyhow!` 宏调用、无调试 `println!`
-- `error.rs` 枚举补齐 `ParseError` + `UnsupportedFormat`（重命名）+ `HomeDirNotFound`
+- `error.rs` 枚举补齐 `ParseError` + `UnsupportedFormat`（重命名）+ `HomeDirNotFound`；T3.4 追加 `TooManyTags`
 - `cargo build` 无 warning；`cargo test` 全绿，既有测试不回归
 
 ---

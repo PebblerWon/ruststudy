@@ -61,7 +61,7 @@
   - 手动测试所有命令
   - **产出：** 基础功能端到端可用
   - **技术方案：** 见 [TECH_SOLUTION.md § 4.7](docs/TECH_SOLUTION.md)
-  - **实现要点：** dispatch 已覆盖 Add/List/Update/Delete/Search，Stats/Export 走 `anyhow::bail!` stub（按技术方案约定）
+  - **实现要点：** dispatch 已覆盖 Add/List/Update/Delete/Search（T1.6）；Stats 由 T2.4 实现，Export 由 T3.2 实现，均已从 `bail!` stub 替换为真实逻辑
 
 **阶段一验收：**
 
@@ -80,10 +80,10 @@ taskflow delete <id>
 
 ### 任务清单
 
-- [✅] **T2.1 列表筛选增强**
+- [x] **T2.1 列表筛选增强** ✅
   - 在 `list` 命令中支持 `--status`、`--priority`、`--tag` 筛选
   - 在 service 层实现筛选逻辑
-  - **产出：** 筛选功能可用
+  - **产出：** `list --status/--priority/--tag` 筛选可用
 
 - [x] **T2.2 搜索功能** ✅
   - 新增 `search` 子命令
@@ -99,7 +99,7 @@ taskflow delete <id>
     - 状态颜色：Done=绿（删除线），InProgress=蓝，Todo=灰
   - 成功/错误/警告信息仍用 `colored` 库（非表格场景无对齐问题）
   - **产出：** 美观的彩色表格输出
-  - **实现要点：** `display.rs` 提供 `print_task_table` + `print_success`/`print_error`/`print_info`/`print_warning`，main.rs 已接入；表格内颜色改用 `comfy_table` 原生 `Cell` 样式 API 以避免 ANSI 转义码导致列宽错位；`print_warning` 当前无 caller，留给 T3.4
+  - **实现要点：** `display.rs` 提供 `print_task_table` + `print_success`/`print_error`/`print_info`/`print_warning`，main.rs 已接入；表格内颜色改用 `comfy_table` 原生 `Cell` 样式 API 以避免 ANSI 转义码导致列宽错位；`print_warning` 由 T3.1 删除确认启用
 
 - [x] **T2.4 统计面板** ✅
   - 新增 `stats` 子命令（CLI 已定义 `Commands::Stats`）
@@ -196,15 +196,15 @@ taskflow --help               # 帮助信息完整
 | T1.4 | ✅ 已完成 | 2026-08-08 | 2026-08-08 | clap derive 子命令齐全                                   |
 | T1.5 | ✅ 已完成 | 2026-08-08 | 2026-08-08 | TaskService 增删改查 + 校验                              |
 | T1.6 | ✅ 已完成 | 2026-08-09 | 2026-08-09 | main.rs dispatch：Add/List/Update/Delete/Search          |
-| T2.1 | ⬜ 待开始 |            |            |                                                          |
+| T2.1 | ✅ 已完成 | 2026-08-09 | 2026-08-09 | list --status/--priority/--tag 筛选                      |
 | T2.2 | ✅ 已完成 | 2026-08-09 | 2026-08-09 | search_task：大小写不敏感 + 单元测试                     |
-| T2.3 | ✅ 已完成 | 2026-08-09 | 2026-08-09 | display.rs + main.rs 接入，print_warning 待 T3.4         |
+| T2.3 | ✅ 已完成 | 2026-08-09 | 2026-08-09 | display.rs + main.rs 接入，print_warning 由 T3.1 启用    |
 | T2.4 | ✅ 已完成 | 2026-08-10 | 2026-08-10 | TaskStats + get_stats + print_stats + 边界测试           |
 | T3.1 | ✅ 已完成 | 2026-08-10 | 2026-08-10 | get_task_by_id + 确认流程 + --force                      |
 | T3.2 | ✅ 已完成 | 2026-08-11 | 2026-08-11 | TaskCsvRow + export_tasks + csv::Reader 测试             |
 | T3.3 | ✅ 已完成 | 2026-08-11 | 2026-08-11 | TaskError 枚举补齐 + 生产 unwrap 归零                    |
 | T3.4 | ✅ 已完成 | 2026-08-11 | 2026-08-11 | validate_title/due_date/tags + 边界测试                  |
-| T3.5 | ✅ 已完成 | 2026-08-11 | 2026-08-12 | TASKFLOW_DATA_DIR + 10 集成测试                          |
+| T3.5 | ✅ 已完成 | 2026-08-11 | 2026-08-12 | TASKFLOW_DATA_DIR + 11 集成测试                          |
 | T3.6 | ✅ 已完成 | 2026-08-12 | 2026-08-12 | long_about + after_help + 全字段 doc comment + test_help |
 
 **状态说明：** ⬜ 待开始 | 🔵 进行中 | ✅ 已完成 | ⏸ 暂停
