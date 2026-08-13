@@ -1,0 +1,8 @@
+[package]
+name = "generics"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "generics"
+path = "src/lib.rs"

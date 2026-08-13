@@ -1,0 +1,8 @@
+[package]
+name = "smart_ptrs"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "smart_ptrs"
+path = "src/lib.rs"

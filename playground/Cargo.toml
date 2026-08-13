@@ -1,0 +1,14 @@
+[workspace]
+members = [
+    "generics",
+    "smart_ptrs",
+    "concurrency",
+    "async_basics",
+    "traits_adv",
+    "macros",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+version = "0.1.0"

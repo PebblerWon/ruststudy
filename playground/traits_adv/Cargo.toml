@@ -1,0 +1,8 @@
+[package]
+name = "traits_adv"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "traits_adv"
+path = "src/lib.rs"

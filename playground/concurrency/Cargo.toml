@@ -1,0 +1,8 @@
+[package]
+name = "concurrency"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+name = "concurrency"
+path = "src/lib.rs"
