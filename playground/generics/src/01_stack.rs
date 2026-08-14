@@ -43,14 +43,14 @@ pub struct Stack<T> {
 impl<T> Stack<T> {
     /// 创建一个空栈
     pub fn new() -> Self {
-        todo!("用 Vec::new() 创建空栈")
+        Stack { items: Vec::new() }
     }
 
     /// 将元素压入栈顶
     ///
     /// 提示：Vec 的 push 方法会添加到末尾，末尾即为"栈顶"
     pub fn push(&mut self, item: T) {
-        todo!("调用 self.items 的 push 方法")
+        self.items.push(item);
     }
 
     /// 弹出栈顶元素，返回 Some(item)。
@@ -58,7 +58,7 @@ impl<T> Stack<T> {
     ///
     /// 提示：Vec 的 pop 方法返回 Option<T>，正好符合需求
     pub fn pop(&mut self) -> Option<T> {
-        todo!("调用 self.items 的 pop 方法")
+        self.items.pop()
     }
 
     /// 查看栈顶元素（不移除），返回 Some(&item)。
@@ -66,17 +66,19 @@ impl<T> Stack<T> {
     ///
     /// 提示：Vec 的 last 方法返回 Option<&T>
     pub fn peek(&self) -> Option<&T> {
-        todo!("调用 self.items 的 last 方法")
+        self.items.last()
     }
 
     /// 返回栈中元素数量
     pub fn len(&self) -> usize {
-        todo!("调用 self.items 的 len 方法")
+        // todo!("调用 self.items 的 len 方法")
+        self.items.len()
     }
 
     /// 判断栈是否为空
     pub fn is_empty(&self) -> bool {
-        todo!("调用 self.items 的 is_empty 方法，或利用 len() 判断")
+        // todo!("调用 self.items 的 is_empty 方法，或利用 len() 判断")
+        self.items.is_empty()
     }
 }
 

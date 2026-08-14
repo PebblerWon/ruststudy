@@ -58,7 +58,10 @@ pub struct Cache<K, V> {
 impl<K: Hash + Eq, V> Cache<K, V> {
     /// 创建一个空缓存
     pub fn new() -> Self {
-        todo!("用 HashMap::new() 创建空缓存")
+        // todo!("用 HashMap::new() 创建空缓存")
+        Cache {
+            data: HashMap::new(),
+        }
     }
 
     /// 插入或更新一个键值对。
@@ -67,7 +70,8 @@ impl<K: Hash + Eq, V> Cache<K, V> {
     /// 提示：HashMap 的 insert 方法返回 Option<V>（旧值）
     ///       本方法不需要返回旧值，直接忽略 insert 的返回值即可
     pub fn insert(&mut self, key: K, value: V) {
-        todo!("调用 self.data 的 insert 方法")
+        // todo!("调用 self.data 的 insert 方法")
+        self.data.insert(key, value);
     }
 
     /// 根据 key 获取值的引用，返回 Some(&V)。
@@ -79,7 +83,8 @@ impl<K: Hash + Eq, V> Cache<K, V> {
     ///
     /// 提示：HashMap 的 get 方法返回 Option<&V>
     pub fn get(&self, key: &K) -> Option<&V> {
-        todo!("调用 self.data 的 get 方法")
+        // todo!("调用 self.data 的 get 方法");
+        self.data.get(key)
     }
 
     /// 删除指定 key，返回被删除的值。
@@ -87,25 +92,50 @@ impl<K: Hash + Eq, V> Cache<K, V> {
     ///
     /// 提示：HashMap 的 remove 方法返回 Option<V>
     pub fn remove(&mut self, key: &K) -> Option<V> {
-        todo!("调用 self.data 的 remove 方法")
+        // todo!("调用 self.data 的 remove 方法")
+        self.data.remove(key)
     }
 
     /// 返回缓存中的键值对数量
     pub fn len(&self) -> usize {
-        todo!("调用 self.data 的 len 方法")
+        // todo!("调用 self.data 的 len 方法")
+        self.data.len()
     }
 
     /// 判断缓存是否为空
     pub fn is_empty(&self) -> bool {
-        todo!("调用 self.data 的 is_empty 方法")
+        // todo!("调用 self.data 的 is_empty 方法")
+        self.data.is_empty()
     }
 
     /// 清空缓存中的所有数据
     pub fn clear(&mut self) {
-        todo!("调用 self.data 的 clear 方法")
+        // todo!("调用 self.data 的 clear 方法")
+        self.data.clear();
     }
 }
 
+pub struct MyCache<K, V> {
+    data: HashMap<K, V>,
+}
+impl<K: Eq + Hash, V> MyCache<K, V> {
+    pub fn new() -> Self {
+        MyCache {
+            data: HashMap::new(),
+        }
+    }
+
+    pub fn insert(&mut self, key: K, value: V) {
+        self.data.insert(key, value);
+    }
+    pub fn get(&self, key: &K) -> Option<&V> {
+        self.data.get(key)
+    }
+
+    pub fn remove(&mut self, key: &K) -> Option<V> {
+        self.data.remove(key)
+    }
+}
 // ────────────── 测试区域 ──────────────
 
 #[cfg(test)]
