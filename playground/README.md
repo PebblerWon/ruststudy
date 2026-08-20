@@ -27,11 +27,11 @@ Phase 4 async/await              →  Phase 5 高级 Trait        →  Phase 6 �
 
 ## Phase 1: 泛型与生命周期 `generics` ✅ 已就绪
 
-| 顺序 | 文件 | 练习内容 | 核心概念 | 测试数 |
-|:----:|------|---------|---------|:-----:|
-| 1 | `generics/src/01_stack.rs` | 泛型栈 | `struct<T>`、泛型方法定义 | 6 |
-| 2 | `generics/src/02_cache.rs` | 泛型缓存 | 双泛型 `<K,V>`、返回引用与生命周期入门 | 7 |
-| 3 | `generics/src/03_lifetimes.rs` | 生命周期标注 | `'a` 显式标注、结构体生命周期、省略规则 | 14 |
+| 顺序 | 文件                           | 练习内容     | 核心概念                                | 测试数 |
+| :--: | ------------------------------ | ------------ | --------------------------------------- | :----: |
+|  1   | `generics/src/01_stack.rs`     | 泛型栈       | `struct<T>`、泛型方法定义               |   6    |
+|  2   | `generics/src/02_cache.rs`     | 泛型缓存     | 双泛型 `<K,V>`、返回引用与生命周期入门  |   7    |
+|  3   | `generics/src/03_lifetimes.rs` | 生命周期标注 | `'a` 显式标注、结构体生命周期、省略规则 |   14   |
 
 ```bash
 cargo test -p generics              # 运行全部 27 个测试
@@ -46,11 +46,11 @@ cargo test -p generics lifetimes_03 # 只测练习 03
 
 ## Phase 2: 智能指针与内部可变性 `smart_ptrs` ⬜ 待实现
 
-| 顺序 | 文件 | 练习内容 | 核心概念 |
-|:----:|------|---------|---------|
-| 4 | `smart_ptrs/src/01_binary_tree.rs` | Box 二叉树 | `Box<T>`、递归类型为什么需要堆分配 |
-| 5 | `smart_ptrs/src/02_graph.rs` | Rc 共享只读 | `Rc<T>`、引用计数、`strong_count` |
-| 6 | `smart_ptrs/src/03_refcell_demo.rs` | RefCell 内部可变性 | `RefCell<T>`、运行时借用检查、`Rc<RefCell<T>>` |
+| 顺序 | 文件                                | 练习内容           | 核心概念                                       |
+| :--: | ----------------------------------- | ------------------ | ---------------------------------------------- |
+|  4   | `smart_ptrs/src/01_binary_tree.rs`  | Box 二叉树         | `Box<T>`、递归类型为什么需要堆分配             |
+|  5   | `smart_ptrs/src/02_graph.rs`        | Rc 共享只读        | `Rc<T>`、引用计数、`strong_count`              |
+|  6   | `smart_ptrs/src/03_refcell_demo.rs` | RefCell 内部可变性 | `RefCell<T>`、运行时借用检查、`Rc<RefCell<T>>` |
 
 ```bash
 cargo test -p smart_ptrs                # 全部
@@ -65,11 +65,11 @@ cargo test -p smart_ptrs refcell_demo_03 # 只测练习 06
 
 ## Phase 3: 多线程与并发 `concurrency` ⬜ 待实现
 
-| 顺序 | 文件 | 练习内容 | 核心概念 |
-|:----:|------|---------|---------|
-| 7 | `concurrency/src/01_threads.rs` | 并行计算斐波那契 | `thread::spawn`、`move` 闭包、`JoinHandle` |
-| 8 | `concurrency/src/02_mutex_arc.rs` | 共享计数器 | `Mutex<T>`、`Arc<T>`、`lock()`、`Send`/`Sync` |
-| 9 | `concurrency/src/03_channels.rs` | 生产者-消费者 | `mpsc::channel`、`send`/`recv`、多线程词频统计 |
+| 顺序 | 文件                              | 练习内容         | 核心概念                                       |
+| :--: | --------------------------------- | ---------------- | ---------------------------------------------- |
+|  7   | `concurrency/src/01_threads.rs`   | 并行计算斐波那契 | `thread::spawn`、`move` 闭包、`JoinHandle`     |
+|  8   | `concurrency/src/02_mutex_arc.rs` | 共享计数器       | `Mutex<T>`、`Arc<T>`、`lock()`、`Send`/`Sync`  |
+|  9   | `concurrency/src/03_channels.rs`  | 生产者-消费者    | `mpsc::channel`、`send`/`recv`、多线程词频统计 |
 
 ```bash
 cargo test -p concurrency                # 全部
@@ -84,12 +84,12 @@ cargo test -p concurrency channels_03    # 只测练习 09
 
 ## Phase 4: async/await 与 tokio `async_basics` ⬜ 待实现
 
-| 顺序 | 文件 | 练习内容 | 核心概念 |
-|:----:|------|---------|---------|
-| 10 | `async_basics/src/01_hello_async.rs` | async/await 基础 | `async fn`、`Future`、`#[tokio::main]`、惰性求值 |
-| 11 | `async_basics/src/02_concurrent_fetch.rs` | 并发 HTTP 请求 | `tokio::spawn`、`join!`、`reqwest` |
-| 12 | `async_basics/src/03_async_channels.rs` | 异步通道 | `tokio::sync::mpsc`、`select!` 宏 |
-| 13 | `async_basics/src/04_word_counter.rs` | 并发文件词频统计 | 综合 async + Mutex + Channel（小实战） |
+| 顺序 | 文件                                      | 练习内容         | 核心概念                                         |
+| :--: | ----------------------------------------- | ---------------- | ------------------------------------------------ |
+|  10  | `async_basics/src/01_hello_async.rs`      | async/await 基础 | `async fn`、`Future`、`#[tokio::main]`、惰性求值 |
+|  11  | `async_basics/src/02_concurrent_fetch.rs` | 并发 HTTP 请求   | `tokio::spawn`、`join!`、`reqwest`               |
+|  12  | `async_basics/src/03_async_channels.rs`   | 异步通道         | `tokio::sync::mpsc`、`select!` 宏                |
+|  13  | `async_basics/src/04_word_counter.rs`     | 并发文件词频统计 | 综合 async + Mutex + Channel（小实战）           |
 
 ```bash
 cargo test -p async_basics                   # 全部
@@ -105,12 +105,12 @@ cargo test -p async_basics word_counter_04     # 只测练习 13
 
 ## Phase 5: 高级 Trait 与运算符重载 `traits_adv` ⬜ 待实现
 
-| 顺序 | 文件 | 练习内容 | 核心概念 |
-|:----:|------|---------|---------|
-| 14 | `traits_adv/src/01_custom_iterator.rs` | 自定义迭代器 | `Iterator` trait、关联类型 `type Item`、迭代器组合 |
-| 15 | `traits_adv/src/02_vec2d.rs` | 运算符重载 | `std::ops::Add`/`Sub`/`Mul`、运算符重载本质 |
-| 16 | `traits_adv/src/03_from_into.rs` | From/TryFrom | 手动实现类型转换（myapp 只用了 `#[from]` 自动生成） |
-| 17 | `traits_adv/src/04_drop_trait.rs` | Drop trait | RAII 模式、自定义资源释放 |
+| 顺序 | 文件                                   | 练习内容     | 核心概念                                            |
+| :--: | -------------------------------------- | ------------ | --------------------------------------------------- |
+|  14  | `traits_adv/src/01_custom_iterator.rs` | 自定义迭代器 | `Iterator` trait、关联类型 `type Item`、迭代器组合  |
+|  15  | `traits_adv/src/02_vec2d.rs`           | 运算符重载   | `std::ops::Add`/`Sub`/`Mul`、运算符重载本质         |
+|  16  | `traits_adv/src/03_from_into.rs`       | From/TryFrom | 手动实现类型转换（myapp 只用了 `#[from]` 自动生成） |
+|  17  | `traits_adv/src/04_drop_trait.rs`      | Drop trait   | RAII 模式、自定义资源释放                           |
 
 ```bash
 cargo test -p traits_adv                       # 全部
@@ -126,10 +126,10 @@ cargo test -p traits_adv drop_trait_04          # 只测练习 17
 
 ## Phase 6: 声明式宏 `macros` ⬜ 待实现
 
-| 顺序 | 文件 | 练习内容 | 核心概念 |
-|:----:|------|---------|---------|
-| 18 | `macros/src/01_vec_of_strings.rs` | 字符串向量宏 | `macro_rules!`、`$x:expr` 片段说明符、重复模式 `$($x:expr),*` |
-| 19 | `macros/src/02_assert_approx_eq.rs` | 近似断言宏 | 多分支匹配、宏卫生性、`format!` 在宏中使用 |
+| 顺序 | 文件                                | 练习内容     | 核心概念                                                      |
+| :--: | ----------------------------------- | ------------ | ------------------------------------------------------------- |
+|  18  | `macros/src/01_vec_of_strings.rs`   | 字符串向量宏 | `macro_rules!`、`$x:expr` 片段说明符、重复模式 `$($x:expr),*` |
+|  19  | `macros/src/02_assert_approx_eq.rs` | 近似断言宏   | 多分支匹配、宏卫生性、`format!` 在宏中使用                    |
 
 ```bash
 cargo test -p macros                         # 全部
@@ -151,14 +151,14 @@ cargo test -p macros assert_approx_eq_02     # 只测练习 19
 
 ## 时间预估
 
-| 阶段 | 练习数 | 预计时间 | 优先级 |
-|------|:-----:|---------|:------:|
-| Phase 1 泛型与生命周期 | 3 | 2-3 天 | 必做 |
-| Phase 2 智能指针 | 3 | 2-3 天 | 必做 |
-| Phase 3 多线程 | 3 | 3-4 天 | 必做 |
-| Phase 4 async/await | 4 | 4-5 天 | 必做 |
-| Phase 5 高级 Trait | 4 | 2-3 天 | 推荐 |
-| Phase 6 宏 | 2 | 1-2 天 | 可选 |
-| **合计** | **19** | **2-3 周** | |
+| 阶段                   | 练习数 | 预计时间   | 优先级 |
+| ---------------------- | :----: | ---------- | :----: |
+| Phase 1 泛型与生命周期 |   3    | 2-3 天     |  必做  |
+| Phase 2 智能指针       |   3    | 2-3 天     |  必做  |
+| Phase 3 多线程         |   3    | 3-4 天     |  必做  |
+| Phase 4 async/await    |   4    | 4-5 天     |  必做  |
+| Phase 5 高级 Trait     |   4    | 2-3 天     |  推荐  |
+| Phase 6 宏             |   2    | 1-2 天     |  可选  |
+| **合计**               | **19** | **2-3 周** |        |
 
 全部完成后，Rust 基础就相当扎实了，再去做任何项目都不会有概念障碍。
