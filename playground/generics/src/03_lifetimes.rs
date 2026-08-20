@@ -240,7 +240,11 @@ mod text_holder_tests {
 /// - 或用 `s.split_whitespace().next()`
 /// - 注意：用 split 方式时，返回的是原始字符串的切片，生命周期正确
 pub fn first_word(s: &str) -> &str {
-    todo!("实现：找到第一个空格，返回空格前的部分")
+    let a = s.chars().position(|b| b == ' ');
+    match a {
+        Some(p) => &s[0..p],
+        None => s,
+    }
 }
 
 // ────── first_word 的测试 ──────
