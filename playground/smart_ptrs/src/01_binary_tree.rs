@@ -43,17 +43,50 @@ pub struct TreeNode {
 impl TreeNode {
     /// 创建一个新节点
     pub fn new(value: i32) -> Self {
-        todo!("实现创建新节点的逻辑")
+        // todo!("实现创建新节点的逻辑");
+        TreeNode {
+            value,
+            left: None,
+            right: None,
+        }
     }
 
     /// 插入一个值到二叉搜索树中
-    /// 
+    ///
     /// 规则：
     /// - 如果值小于当前节点，往左子树插
     /// - 如果值大于当前节点，往右子树插
     /// - 如果相等，忽略（不重复插入）
     pub fn insert(&mut self, value: i32) {
-        todo!("实现 BST 插入逻辑")
+        // todo!("实现 BST 插入逻辑")
+
+        let mut left = self.left.as_mut();
+        let mut right = self.right.as_mut();
+
+        if self.value == value {
+            return;
+        }
+        if value < self.value {
+            match left {
+                None => {
+                    self.left = Some(Box::new(TreeNode::new(value)));
+                }
+                Some(n) => {
+                    let b = n.as_mut();
+                    b.insert(value);
+                }
+            }
+        } else {
+            match right {
+                None => {
+                    self.right = Some(Box::new(TreeNode::new(value)));
+                }
+                Some(n) => {
+                    let b = n.as_mut();
+                    b.insert(value);
+                }
+            }
+        }
     }
 
     /// 判断树中是否包含某个值
@@ -124,7 +157,7 @@ mod tests {
         let mut root = TreeNode::new(10);
         root.insert(10);
         root.insert(10);
-        
+
         // 应该只有一个节点
         assert!(root.left.is_none());
         assert!(root.right.is_none());
@@ -136,7 +169,7 @@ mod tests {
         for i in 1..=10 {
             root.insert(i);
         }
-        
+
         assert_eq!(root.in_order(), vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
         assert!(root.contains(1));
         assert!(root.contains(10));
