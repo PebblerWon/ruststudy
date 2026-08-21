@@ -58,45 +58,69 @@ impl TreeNode {
     /// - 如果值大于当前节点，往右子树插
     /// - 如果相等，忽略（不重复插入）
     pub fn insert(&mut self, value: i32) {
-        // todo!("实现 BST 插入逻辑")
-
-        let mut left = self.left.as_mut();
-        let mut right = self.right.as_mut();
-
         if self.value == value {
             return;
         }
+        let mut target = &mut self.right;
         if value < self.value {
-            match left {
-                None => {
-                    self.left = Some(Box::new(TreeNode::new(value)));
-                }
-                Some(n) => {
-                    let b = n.as_mut();
-                    b.insert(value);
-                }
+            target = &mut self.left;
+        }
+        match target {
+            None => {
+                *target = Some(Box::new(TreeNode::new(value)));
             }
-        } else {
-            match right {
-                None => {
-                    self.right = Some(Box::new(TreeNode::new(value)));
-                }
-                Some(n) => {
-                    let b = n.as_mut();
-                    b.insert(value);
-                }
+            Some(n) => {
+                n.insert(value);
             }
         }
     }
 
     /// 判断树中是否包含某个值
     pub fn contains(&self, value: i32) -> bool {
-        todo!("实现查找逻辑")
+        if self.value == value {
+            return true;
+        }
+        let target = if value < self.value {
+            &self.left
+        } else {
+            &self.right
+        };
+        match target {
+            None => false,
+            Some(n) => n.contains(value),
+        }
     }
 
     /// 中序遍历，返回排序后的向量
     pub fn in_order(&self) -> Vec<i32> {
-        todo!("实现中序遍历")
+        // todo!("实现中序遍历")
+        let mut nodes = vec![self];
+        let mut res: Vec<i32> = vec![];
+
+        while !nodes.is_empty() {
+            let target = nodes.last().unwrap();
+
+            let left = &target.left;
+
+            if let Some(n) = left {
+                nodes.push(n);
+            } else {
+                loop {
+                    let n = nodes.pop();
+                    if let Some(node) = n {
+                        res.push(node.value);
+                        if let Some(r) = &node.right {
+                            nodes.push(r);
+                            break;
+                        }
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+
+        res
     }
 }
 
