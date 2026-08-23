@@ -1,0 +1,9 @@
+[book]
+title = "Rust 进阶教程：补全 TaskFlow 之外的知识"
+authors = ["pebblerwon"]
+language = "zh"
+multilingual = false
+src = "src"
+
+[output.html]
+default-theme = "light"
