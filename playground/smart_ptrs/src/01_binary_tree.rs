@@ -122,6 +122,33 @@ impl TreeNode {
 
         res
     }
+
+    /// 中序遍历，返回排序后的向量
+    pub fn in_order2(&self) -> Vec<i32> {
+        if self.left.is_none() && self.right.is_none() {
+            return vec![self.value];
+        }
+        let left_value = self.left.as_ref().map_or(vec![], |v| v.in_order2());
+        let right_value = self.right.as_ref().map_or(vec![], |v| v.in_order2());
+
+        [left_value, vec![self.value], right_value].concat()
+    }
+
+    /// 中序遍历，返回排序后的向量
+    pub fn in_order3(&self) -> Vec<i32> {
+        let mut res = Vec::new();
+        self.in_order3_into(&mut res);
+        res
+    }
+    pub fn in_order3_into(&self, result: &mut Vec<i32>) {
+        if let Some(left) = &self.left {
+            left.in_order3_into(result);
+        }
+        result.push(self.value);
+        if let Some(right) = &self.right {
+            right.in_order3_into(result);
+        }
+    }
 }
 
 // ────────────── 测试区域 ──────────────
@@ -173,6 +200,30 @@ mod tests {
         root.insert(4);
 
         let sorted = root.in_order();
+        assert_eq!(sorted, vec![1, 3, 4, 5, 7]);
+    }
+
+    #[test]
+    fn test_in_order2_traversal() {
+        let mut root = TreeNode::new(5);
+        root.insert(3);
+        root.insert(7);
+        root.insert(1);
+        root.insert(4);
+
+        let sorted = root.in_order2();
+        assert_eq!(sorted, vec![1, 3, 4, 5, 7]);
+    }
+
+    #[test]
+    fn test_in_order3_traversal() {
+        let mut root = TreeNode::new(5);
+        root.insert(3);
+        root.insert(7);
+        root.insert(1);
+        root.insert(4);
+
+        let sorted = root.in_order3();
         assert_eq!(sorted, vec![1, 3, 4, 5, 7]);
     }
 
