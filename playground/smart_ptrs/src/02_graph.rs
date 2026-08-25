@@ -39,18 +39,32 @@ pub struct GraphNode {
 impl GraphNode {
     /// 创建一个新节点
     pub fn new(value: i32) -> Rc<Self> {
-        todo!("创建一个新的 Rc 包裹的 GraphNode")
+        // todo!("创建一个新的 Rc 包裹的 GraphNode")
+
+        Rc::new(GraphNode {
+            value,
+            parent: None,
+        })
     }
 
     /// 创建一个带有父节点的子节点
     pub fn with_parent(value: i32, parent: Rc<GraphNode>) -> Rc<Self> {
-        todo!("创建一个带有父引用的节点")
+        // todo!("创建一个带有父引用的节点")
+        // Rc::new(GraphNode {
+        //     value,
+        //     parent: Some(Rc::clone(&parent)),
+        // })
+        Rc::new(GraphNode {
+            value,
+            parent: Some(parent),
+        })
     }
 }
 
 /// 返回某个节点当前的强引用计数
 pub fn get_ref_count(node: &Rc<GraphNode>) -> usize {
-    todo!("使用 Rc::strong_count 获取引用数")
+    // todo!("使用 Rc::strong_count 获取引用数")
+    Rc::strong_count(node)
 }
 
 // ────────────── 测试区域 ──────────────
@@ -72,12 +86,19 @@ mod tests {
         let child1 = GraphNode::with_parent(2, Rc::clone(&parent));
         let child2 = GraphNode::with_parent(3, Rc::clone(&parent));
 
+        assert_eq!(get_ref_count(&parent), 3);
         // 两个子节点都指向同一个父节点
         assert_eq!(child1.parent.as_ref().unwrap().value, 1);
         assert_eq!(child2.parent.as_ref().unwrap().value, 1);
-        
+        assert_eq!(get_ref_count(&parent), 3);
+        assert_eq!(get_ref_count(child1.parent.as_ref().unwrap()), 3);
+        assert_eq!(get_ref_count(child2.parent.as_ref().unwrap()), 3);
+
         // 验证它们指向的是同一个对象（指针地址相同）
-        assert!(Rc::ptr_eq(&child1.parent.as_ref().unwrap(), &child2.parent.as_ref().unwrap()));
+        assert!(Rc::ptr_eq(
+            &child1.parent.as_ref().unwrap(),
+            &child2.parent.as_ref().unwrap()
+        ));
     }
 
     #[test]
@@ -99,7 +120,7 @@ mod tests {
             let _temp = Rc::clone(&node);
             assert_eq!(get_ref_count(&node), 2);
         } // _temp 在这里被丢弃
-        
+
         assert_eq!(get_ref_count(&node), 1);
     }
 
