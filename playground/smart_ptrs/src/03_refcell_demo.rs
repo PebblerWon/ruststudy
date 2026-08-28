@@ -40,19 +40,22 @@ pub struct Counter {
 impl Counter {
     /// 创建一个初始值为 0 的计数器
     pub fn new() -> Self {
-        todo!("初始化 RefCell")
+        // todo!("初始化 RefCell")
+        Counter {
+            count: RefCell::new(0),
+        }
     }
 
     /// 增加计数
-    /// 
+    ///
     /// 注意：这个方法只接受 &self，但依然能修改内部状态
     pub fn increment(&self) {
-        todo!("使用 borrow_mut 修改内部值")
+        // todo!("使用 borrow_mut 修改内部值")
+        *self.count.borrow_mut() += 1;
     }
-
     /// 获取当前计数
     pub fn get_count(&self) -> u32 {
-        todo!("使用 borrow 读取内部值")
+        *self.count.borrow()
     }
 }
 
@@ -66,10 +69,10 @@ mod tests {
     fn test_basic_increment() {
         let counter = Counter::new();
         assert_eq!(counter.get_count(), 0);
-        
+
         counter.increment();
         assert_eq!(counter.get_count(), 1);
-        
+
         counter.increment();
         assert_eq!(counter.get_count(), 2);
     }
@@ -92,8 +95,8 @@ mod tests {
     fn test_borrow_panic_on_conflict() {
         let counter = Counter::new();
         let _borrowed = counter.count.borrow(); // 不可变借用
-        
+
         // 此时再尝试可变借用会 panic
-        counter.increment(); 
+        counter.increment();
     }
 }
