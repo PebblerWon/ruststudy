@@ -33,9 +33,17 @@ pub async fn fetch_status(url: &str) -> Result<u16, reqwest::Error> {
 }
 
 /// 并发获取两个 URL 的状态码
-pub async fn concurrent_fetch(url1: &str, url2: &str) -> (Result<u16, reqwest::Error>, Result<u16, reqwest::Error>) {
+pub async fn concurrent_fetch(
+    url1: &str,
+    url2: &str,
+) -> (Result<u16, reqwest::Error>, Result<u16, reqwest::Error>) {
     // 提示：使用 tokio::join! 同时发起两个请求
-    todo!("并发请求两个 URL")
+
+    let res = tokio::join!(reqwest::get(url1), reqwest::get(url2));
+    (
+        res.0.map(|r| r.status().as_u16()),
+        res.1.map(|r| r.status().as_u16()),
+    )
 }
 
 // ────────────── 测试区域 ──────────────
@@ -55,8 +63,9 @@ mod tests {
     async fn test_concurrent_fetch_results() {
         let (res1, res2) = concurrent_fetch(
             "https://httpbin.org/status/201",
-            "https://httpbin.org/status/404"
-        ).await;
+            "https://httpbin.org/status/404",
+        )
+        .await;
 
         assert_eq!(res1.unwrap(), 201);
         assert_eq!(res2.unwrap(), 404);

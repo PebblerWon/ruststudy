@@ -30,7 +30,7 @@ use tokio::sync::mpsc;
 pub async fn producer(tx: mpsc::Sender<u32>, n: u32) {
     for i in 0..n {
         // 提示：使用 send().await
-        todo!("发送数字")
+        tx.send(i).await.unwrap();
     }
 }
 
@@ -59,7 +59,7 @@ mod tests {
 
         // 在主任务中消费
         let sum = consumer(rx).await;
-        
+
         // 0 + 1 + 2 + 3 + 4 = 10
         assert_eq!(sum, 10);
     }

@@ -27,12 +27,17 @@
 
 // ────────────── 实现区域 ──────────────
 
+use std::str::FromStr;
+
 use tokio::time::{sleep, Duration};
 
 /// 模拟一个异步问候操作
 pub async fn greet_async(name: &str) -> String {
     sleep(Duration::from_secs(1)).await;
-    todo!("返回问候语")
+    let mut s = String::from("Hello, ");
+    s.push_str(name);
+    s.push('!');
+    s
 }
 
 /// 依次执行两个问候任务
@@ -47,6 +52,7 @@ pub async fn run_greetings() -> (String, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::executor::block_on;
     use tokio::time::Instant;
 
     #[tokio::test]
@@ -63,7 +69,7 @@ mod tests {
 
         assert_eq!(first, "Hello, Alice!");
         assert_eq!(second, "Hello, Bob!");
-        
+
         // 顺序执行应该至少耗时 2 秒
         assert!(duration >= Duration::from_secs(2));
     }
