@@ -39,13 +39,12 @@ pub fn parallel_word_count(texts: Vec<String>) -> usize {
 
     for text in texts {
         let tx_clone = tx.clone();
-        
+
         let handle = thread::spawn(move || {
             let count = count_words(&text);
-            // 提示：通过通道发送结果
-            todo!("发送统计结果")
+            tx_clone.send(count).expect("接收端已关闭");
         });
-        
+
         handles.push(handle);
     }
 
@@ -54,7 +53,10 @@ pub fn parallel_word_count(texts: Vec<String>) -> usize {
 
     let mut total = 0;
     // 提示：从通道接收所有结果并累加
-    todo!("接收并汇总结果")
+    for d in rx {
+        total += d;
+    }
+    total
 }
 
 // ────────────── 测试区域 ──────────────
@@ -77,14 +79,14 @@ mod tests {
             "rust concurrency".to_string(),
             "message passing".to_string(),
         ];
-        
+
         assert_eq!(parallel_word_count(texts), 6);
     }
 
     #[test]
     fn test_channel_communication() {
         let (tx, rx) = mpsc::channel();
-        
+
         thread::spawn(move || {
             tx.send(42).unwrap();
         });

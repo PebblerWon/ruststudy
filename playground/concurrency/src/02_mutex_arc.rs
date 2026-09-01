@@ -37,12 +37,13 @@ pub fn increment_counter(num_threads: u32) -> u32 {
 
     for _ in 0..num_threads {
         let counter_clone = Arc::clone(&counter);
-        
+
         let handle = thread::spawn(move || {
             // 提示：获取锁并修改内部值
-            todo!("获取锁并增加计数")
+            let mut thread_counter = counter_clone.lock().unwrap();
+            *thread_counter += 1;
         });
-        
+
         handles.push(handle);
     }
 
@@ -52,7 +53,8 @@ pub fn increment_counter(num_threads: u32) -> u32 {
     }
 
     // 返回最终结果
-    *counter.lock().unwrap()
+    let r = counter.lock().unwrap();
+    *r
 }
 
 // ────────────── 测试区域 ──────────────

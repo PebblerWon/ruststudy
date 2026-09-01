@@ -30,18 +30,29 @@ pub fn fib(n: u64) -> u64 {
     if n <= 1 {
         return n;
     }
-    todo!("实现递归逻辑")
+
+    fib(n - 1) + fib(n - 2)
 }
 
 /// 使用多线程并行计算斐波那契数
+///
+/// 只在顶层开启两个线程分别计算 `fib(n-1)` 和 `fib(n-2)`，
+/// 子线程内部使用串行 `fib`。
+///
+/// 注意：不要在递归的每一层都 `thread::spawn`——那样产生的线程数
+/// 会以斐波那契速率爆炸增长（`parallel_fib(30)` 需要约 83 万个线程）。
 pub fn parallel_fib(n: u64) -> u64 {
     if n <= 1 {
         return n;
     }
-    
-    // 提示：使用 thread::spawn 开启两个子任务
-    // 记得使用 move 闭包来捕获 n
-    todo!("开启线程并行计算")
+
+    // move 闭包把 n 的所有权转移进线程；
+    // join() 返回 Result<T, Box<dyn Any + Send>>，线程 panic 时为 Err
+    let handle_left = std::thread::spawn(move || fib(n - 1));
+    let handle_right = std::thread::spawn(move || fib(n - 2));
+    let a = handle_left.join().expect("子线程 panic");
+    let b = handle_right.join().expect("子线程 panic");
+    a + b
 }
 
 // ────────────── 测试区域 ──────────────
@@ -65,6 +76,12 @@ mod tests {
         assert_eq!(parallel_fib(1), 1);
         assert_eq!(parallel_fib(10), 55);
         assert_eq!(parallel_fib(20), 6765);
+    }
+
+    #[test]
+    fn test_parallel_fib_matches_serial() {
+        // 更大输入下仍与串行版本一致
+        assert_eq!(parallel_fib(30), fib(30));
     }
 
     #[test]
