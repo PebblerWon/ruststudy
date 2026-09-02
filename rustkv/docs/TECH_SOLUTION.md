@@ -149,8 +149,8 @@ rustkv/
 
 ┌─────────────────────────────────────────┐
 │           数据模型层                      │
-│  models/value.rs + linked_list.rs        │
-│  职责：类型定义、转换、运算符重载          │
+│  models/value.rs + entry.rs + linked_list.rs │
+│  职责：类型定义、TTL 条目、转换、运算符重载   │
 └─────────────────────────────────────────┘
 ```
 
@@ -256,7 +256,7 @@ impl Value {
 - `Value` 是枚举而非 trait 对象——值类型有限且固定，枚举比 `dyn` 更高效（栈分配、无虚函数调用）
 - `List(LinkedList)` 使用自定义链表而非 `Vec<String>`——刻意使用 `Box` 递归类型作为学习练习
 - `From` 手动实现而非 `#[from]` 自动生成——理解 trait 转换原理，对比 myapp 中 `#[from]` 的用法
-- 运算符重载（`Add`）实现见 [§ 4.8](#48-运算符重载-modelsvaluers-扩展)
+- 运算符重载（`Add`）实现见 [§ 4.9](#49-运算符重载-modelsvaluers-扩展)
 
 ### 4.2 LinkedList (`models/linked_list.rs`)
 
@@ -335,7 +335,60 @@ impl std::fmt::Display for LinkedList {
 - `take()` 方法：把 `Option` 的值取出来并留下 `None`，避免所有权问题——这是 Rust 链表操作的核心技巧
 - 推荐对比学习：`Vec<String>` 是连续内存数组，`LinkedList` 是堆上链式结构，各有适用场景
 
-### 4.3 Engine 基础（Phase 1 单线程版）(`engine.rs`)
+### 4.3 Entry 结构体 (`models/entry.rs`)
+
+**学习目标：** `Instant` 时间点处理、TTL（Time-To-Live）过期判定逻辑
+
+```rust
+use std::time::{Duration, Instant};
+use crate::models::value::Value;
+
+/// 键值条目：包含值 + 创建时间 + 可选过期时间
+/// Instant 是单调时钟时间点，适合测量持续时间，不可序列化
+#[derive(Debug, Clone)]
+pub struct Entry {
+    pub value: Value,
+    pub created_at: Instant,              // 创建时间，用于统计/调试
+    pub expires_at: Option<Instant>,      // None 表示永不过期
+}
+
+impl Entry {
+    /// 创建新条目
+    /// ttl: Some(Duration) 表示存活时长，None 表示永久
+    pub fn new(value: Value, ttl: Option<Duration>) -> Self {
+        let now = Instant::now();
+        let expires_at = ttl.map(|d| now + d);
+        // Instant::now() + Duration → 得到未来的时间点
+        Self { value, created_at: now, expires_at }
+    }
+
+    /// 判断是否已过期
+    pub fn is_expired(&self) -> bool {
+        self.expires_at.map_or(false, |exp| Instant::now() >= exp)
+        // map_or(false, ...)：None → false（永不过期），Some → 比较时间
+    }
+
+    /// 判断在指定时间点是否已过期（用于批量清理）
+    pub fn is_expired_at(&self, now: Instant) -> bool {
+        self.expires_at.map_or(false, |exp| now >= exp)
+    }
+
+    /// 获取条目存活时长（创建至今）
+    pub fn age(&self) -> Duration {
+        Instant::now().duration_since(self.created_at)
+    }
+}
+```
+
+**设计要点：**
+
+- **`created_at: Instant`**：记录条目创建时间，与 PRD §4.2 数据模型一致。可用于 STATS 统计（条目存活时长）、调试日志。`age()` 方法返回 `Duration` 表示存活时长
+- **`Instant` vs `SystemTime`**：`Instant` 是单调时钟（不会因系统时间调整而跳变），适合测量「经过了多久」；`SystemTime` 是挂钟时间，可序列化但不可靠。TTL 场景用 `Instant` 更准确
+- **`Option<Instant>`**：`None` 表示永不过期，`Some(instant)` 表示在该时间点过期。`Option` 的 `map_or` 方法优雅处理两种情况
+- **两个 `is_expired` 方法**：`is_expired()` 用 `Instant::now()` 实时判断（用于 GET 时懒检查）；`is_expired_at(now)` 接收外部时间参数（用于 TTL 清理任务批量检查，保证同一批次用统一时间基准）
+- **不可序列化**：`Instant` 没有 `Serialize`/`Deserialize` 实现，因此 `Entry` 不能直接持久化到快照。快照序列化时需要单独处理（见 `snapshot.rs`）
+
+### 4.4 Engine 基础（Phase 1 单线程版）(`engine.rs`)
 
 **学习目标：** RefCell 内部可变性、Rc 引用计数、生命周期限制
 
@@ -423,7 +476,7 @@ impl Engine {
 - **生命周期限制**：`get` 看似可以返回 `&Value`，但 `RefCell::borrow()` 返回的 `Ref<'_, T>` 是 RAII guard，不能逃逸出函数。所以返回 `Option<Value>`（clone），这是 RefCell 的固有限制
 - **为什么 Phase 1 用 RefCell 而非直接 `&mut self`**：Engine 方法接收 `&self`（不可变引用），但需要修改内部 HashMap。RefCell 允许在不可变引用下修改内部数据——这就是「内部可变性」
 
-### 4.4 Engine 线程安全版（Phase 2 演进）
+### 4.5 Engine 线程安全版（Phase 2 演进）
 
 **学习目标：** Arc、Mutex、RAII 锁释放、Send/Sync
 
@@ -513,7 +566,7 @@ impl Engine {
 - **RAII 锁释放**：`MutexGuard` 在 drop 时自动释放锁，不需要手动 `unlock()`，也不会忘记释放
 - **PoisonError**：如果持有锁的线程 panic，锁会「中毒」，后续 `lock()` 返回 `Err`。用 `?` 传播
 
-### 4.5 WAL 写前日志 (`wal.rs`)
+### 4.6 WAL 写前日志 (`wal.rs`)
 
 **学习目标：** mpsc channel（Phase 2）→ async channel（Phase 3）
 
@@ -624,7 +677,7 @@ impl AsyncWal {
 - **channel 关闭**：所有 `Sender` drop 后，`Receiver` 的迭代/recv 会自然结束
 - **有界 vs 无界**：异步 channel 默认有界（背压保护），同步 channel 默认无界（可能内存泄漏）
 
-### 4.6 TTL 过期管理 (`ttl.rs`)
+### 4.7 TTL 过期管理 (`ttl.rs`)
 
 **学习目标：** tokio::spawn、async 定时器、select! 多路复用、优雅关闭
 
@@ -685,7 +738,7 @@ impl TtlManager {
 - **优雅关闭**：通过 channel 发送关闭信号，让后台任务自行退出，避免强制 abort（可能导致数据不一致）
 - **retain**：`HashMap::retain` 保留满足条件的元素，删除不满足的——比手动遍历删除更高效
 
-### 4.7 自定义 Iterator (`scanner.rs`)
+### 4.8 自定义 Iterator (`scanner.rs`)
 
 **学习目标：** Iterator trait、关联类型、迭代器组合链
 
@@ -752,7 +805,7 @@ impl Iterator for ScanIterator {
 - **for 循环语法糖**：`for x in iter` 等价于 `while let Some(x) = iter.next()`
 - **零成本抽象**：实现 `Iterator` 后自动获得 `.map()`, `.filter()`, `.collect()`, `.sum()` 等方法，编译期单态化，无运行时开销
 
-### 4.8 运算符重载 (`models/value.rs` 扩展)
+### 4.9 运算符重载 (`models/value.rs` 扩展)
 
 **学习目标：** std::ops trait、运算符重载模式
 
@@ -807,7 +860,7 @@ impl Add for Value {
 - **Rust 的运算符重载**：通过实现 `std::ops` 下的 trait 实现（`Add`=`+`，`Sub`=`-`，`Mul`=`*`，`Index`=`[]` 等）
 - **不能创建新运算符**：只能重载已有的运算符，且操作数数量固定
 
-### 4.9 声明式宏 (`macros.rs`)
+### 4.10 声明式宏 (`macros.rs`)
 
 **学习目标：** macro_rules!、片段说明符、宏卫生性
 
