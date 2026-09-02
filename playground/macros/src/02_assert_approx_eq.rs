@@ -23,12 +23,26 @@
 #[macro_export]
 macro_rules! assert_approx_eq {
     // 情况 1: 两个参数，使用默认误差
-    ($left:expr, $right:expr) => {
-        todo!("实现默认误差断言")
-    };
+    ($left:expr, $right:expr) => {{
+        let eps = 1e-6;
+        let a = $left - $right;
+        if a < -eps || a > eps {
+            // println!("left={},right={},eps={}", *left_val, *right_val, eps)
+            panic!("left={},right={},eps={}", $left, $right, eps)
+        }
+    }};
     // 情况 2: 三个参数，使用指定误差
     ($left:expr, $right:expr, $eps:expr) => {
-        todo!("实现自定义误差断言")
+        match (&$left, &$right, &$eps) {
+            (left_val, right_val, eps) => {
+                let eps = *eps;
+                let a = *left_val - *right_val;
+                if a < -eps || a > eps {
+                    // println!("left={},right={},eps={}", *left_val, *right_val, eps);
+                    panic!("left={},right={},eps={}", *left_val, *right_val, eps);
+                }
+            }
+        }
     };
 }
 

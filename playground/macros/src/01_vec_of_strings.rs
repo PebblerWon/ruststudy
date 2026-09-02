@@ -28,7 +28,13 @@
 macro_rules! vec_of_strings {
     // 提示：使用重复模式捕获多个表达式，并在展开时对每个表达式调用 .to_string()
     ($($x:expr),*) => {
-        todo!("实现宏逻辑")
+        {
+            let mut temp_vec = Vec::<String>::new();
+            $(
+                temp_vec.push($x.to_string());
+            )*
+            temp_vec
+        }
     };
 }
 
@@ -36,7 +42,6 @@ macro_rules! vec_of_strings {
 
 #[cfg(test)]
 mod tests {
-    use crate::vec_of_strings;
 
     #[test]
     fn test_empty_macro() {
