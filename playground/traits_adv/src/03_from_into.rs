@@ -33,7 +33,7 @@ pub struct EmailAddress {
 
 impl From<String> for EmailAddress {
     fn from(s: String) -> Self {
-        todo!("直接包装字符串")
+        EmailAddress { value: s }
     }
 }
 
@@ -42,7 +42,9 @@ impl TryFrom<&str> for EmailAddress {
 
     fn try_from(value: &str) -> Result<Self, Self::Error> {
         if value.contains('@') {
-            Ok(EmailAddress { value: value.to_string() })
+            Ok(EmailAddress {
+                value: value.to_string(),
+            })
         } else {
             Err("Invalid email: missing @ symbol".to_string())
         }

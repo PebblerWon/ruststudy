@@ -53,7 +53,7 @@ mod tests {
     #[test]
     fn test_drop_is_called() {
         let status = Arc::new(Mutex::new("Open".to_string()));
-        
+
         {
             let _handle = FileHandle {
                 name: "test.txt".to_string(),
@@ -70,8 +70,14 @@ mod tests {
         let status2 = Arc::new(Mutex::new("Open".to_string()));
 
         {
-            let _h1 = FileHandle { name: "a.txt".to_string(), status: status1.clone() };
-            let _h2 = FileHandle { name: "b.txt".to_string(), status: status2.clone() };
+            let _h1 = FileHandle {
+                name: "a.txt".to_string(),
+                status: status1.clone(),
+            };
+            let _h2 = FileHandle {
+                name: "b.txt".to_string(),
+                status: status2.clone(),
+            };
         }
 
         assert_eq!(*status1.lock().unwrap(), "Closed a.txt");

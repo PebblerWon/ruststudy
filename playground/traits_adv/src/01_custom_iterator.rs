@@ -41,7 +41,12 @@ impl Iterator for Counter {
 
     fn next(&mut self) -> Option<Self::Item> {
         // 提示：每次调用 count + 1，如果超过 max 则返回 None
-        todo!("实现 next 逻辑")
+        self.count += 1;
+        if self.count > self.max {
+            None
+        } else {
+            Some(self.count)
+        }
     }
 }
 
@@ -61,13 +66,10 @@ mod tests {
     #[test]
     fn test_iterator_with_adapters() {
         let counter = Counter::new(10);
-        
+
         // 求 1 到 10 中偶数的平方和
-        let sum: usize = counter
-            .filter(|&x| x % 2 == 0)
-            .map(|x| x * x)
-            .sum();
-            
+        let sum: usize = counter.filter(|&x| x % 2 == 0).map(|x| x * x).sum();
+
         assert_eq!(sum, 4 + 16 + 36 + 64 + 100);
     }
 

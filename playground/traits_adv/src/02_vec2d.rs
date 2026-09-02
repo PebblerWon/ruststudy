@@ -26,7 +26,7 @@
 
 // ────────────── 实现区域 ──────────────
 
-use std::ops::{Add, Sub, Mul};
+use std::ops::{Add, Mul, Sub};
 
 /// 二维向量
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -39,7 +39,10 @@ impl Add for Vec2d {
     type Output = Vec2d;
 
     fn add(self, rhs: Self) -> Self::Output {
-        todo!("实现向量加法")
+        Vec2d {
+            x: self.x + rhs.x,
+            y: self.y + rhs.y,
+        }
     }
 }
 
@@ -47,7 +50,10 @@ impl Sub for Vec2d {
     type Output = Vec2d;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        todo!("实现向量减法")
+        Vec2d {
+            x: self.x - rhs.x,
+            y: self.y - rhs.y,
+        }
     }
 }
 
@@ -55,7 +61,10 @@ impl Mul<f64> for Vec2d {
     type Output = Vec2d;
 
     fn mul(self, rhs: f64) -> Self::Output {
-        todo!("实现标量乘法")
+        Vec2d {
+            x: self.x * rhs,
+            y: self.y * rhs,
+        }
     }
 }
 
