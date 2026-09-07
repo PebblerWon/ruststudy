@@ -1,4 +1,3 @@
-use std::cell::Ref;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::{cell::RefCell, rc::Rc};
@@ -45,6 +44,16 @@ impl Engine {
         self.store.borrow_mut().insert(key.to_string(), entry);
     }
 
+    pub fn get(&self, key: &str) -> Option<Value> {
+        let store = self.store.borrow();
+        store.get(key).and_then(|entry| {
+            if entry.is_expired() {
+                None
+            } else {
+                Some(entry.value.clone())
+            }
+        })
+    }
     pub fn del(&self, key: &str) -> bool {
         self.store.borrow_mut().remove(key).is_some()
     }
@@ -61,5 +70,21 @@ impl Engine {
             .cloned()
             .collect();
         filtered_keys
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use crate::engine::{Config, Engine};
+    use crate::models::Value;
+
+    #[test]
+    fn test_engine() {
+        let engine = Engine::new(Config::default());
+        engine.put("name", Value::from("RustKV"), None);
+        assert_eq!(engine.get("name"), Some(Value::String("RustKV".into())));
+        engine.put("count", Value::from(42i64), None);
+        engine.del("name");
+        assert_eq!(engine.len(), 1);
     }
 }
