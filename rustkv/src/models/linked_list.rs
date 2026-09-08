@@ -85,3 +85,21 @@ impl std::fmt::Display for LinkedList {
         write!(f, "{}", v.join(" "))
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::LinkedList;
+
+    #[test]
+    pub fn testa() {
+        let mut a = LinkedList::new();
+        a.push("1".to_string());
+        let n = a.pop();
+        assert!(n.is_some());
+        assert_eq!(n.unwrap(), "1");
+        assert_eq!(a.len(), 0);
+        let n2 = a.pop();
+        assert!(n2.is_none());
+        assert_eq!(a.len(), 0);
+    }
+}

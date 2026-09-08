@@ -50,3 +50,16 @@ impl Value {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::Value;
+
+    #[test]
+    fn test_from() {
+        let a = Value::from("a");
+        assert_eq!(a, Value::String(String::from("a")));
+        let b: Value = "b".into();
+        assert_eq!(b, Value::String(String::from("b")));
+    }
+}
