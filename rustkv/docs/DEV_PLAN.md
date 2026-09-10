@@ -16,36 +16,37 @@
 
 ### 任务清单
 
-- [ ] **T1.1 项目初始化**
+- [x] **T1.1 项目初始化** ✅
   - `cargo init --lib` 创建 library 项目
   - 配置 `Cargo.toml`（tokio/clap 先注释，后续阶段启用）
   - 建立项目目录结构
   - **产出：** 可编译的空项目骨架
   - **技术方案：** 见 [TECH_SOLUTION.md § 1.3](docs/TECH_SOLUTION.md)
 
-- [ ] **T1.2 Value 类型定义**
+- [x] **T1.2 Value 类型定义** ✅
   - 定义泛型 `Value` 枚举：String / Integer / List / Hash
   - 为 `Value` 实现 `Display` trait
   - 手动实现 `From<&str>` / `From<i64>` / `From<String>`（非 derive）
   - **学习点：** 泛型枚举、From/Into trait 手动实现
   - **技术方案：** 见 [TECH_SOLUTION.md § 4.1](docs/TECH_SOLUTION.md)
 
-- [ ] **T1.3 LinkedList 实现**
+- [x] **T1.3 LinkedList 实现** ✅
   - 用 `Box<Node>` 实现递归链表类型
   - 实现 `push` / `pop` / `len` / `is_empty` 方法
   - 实现 `Display` trait
   - **学习点：** Box 智能指针、递归类型、为何递归类型必须用 Box
   - **技术方案：** 见 [TECH_SOLUTION.md § 4.2](docs/TECH_SOLUTION.md)
 
-- [ ] **T1.4 Engine 基础（单线程版）**
+- [x] **T1.4 Engine 基础（单线程版）** ✅
   - 定义 `Engine` 结构体，持有 `RefCell<HashMap<String, Entry>>`
   - 实现 `put` / `get` / `del` / `keys` 方法（返回 Result）
   - 用 `Rc<Config>` 共享配置
   - 定义 `Entry` 结构体（含 TTL 字段）
   - **学习点：** RefCell 内部可变性、Rc 引用计数、生命周期限制
-  - **技术方案：** 见 [TECH_SOLUTION.md § 4.3](docs/TECH_SOLUTION.md)
+  - **技术方案：** 见 [TECH_SOLUTION.md § 4.4](docs/TECH_SOLUTION.md)（Entry 见 § 4.3）
+  - **完成摘要：** 已落地并演进至 Phase 2（RefCell→Arc/Mutex、Rc→Arc，方法统一返回 Result）
 
-- [ ] **T1.5 单元测试**
+- [x] **T1.5 单元测试** ✅
   - 测试各数据类型的 put/get
   - 测试 LinkedList 操作边界
   - 测试 From/Into 转换正确性
@@ -71,19 +72,21 @@ assert_eq!(engine.len(), 1);
 
 ### 任务清单
 
-- [ ] **T2.1 Engine 线程安全改造**
+- [x] **T2.1 Engine 线程安全改造** ✅
   - 将 `RefCell<HashMap>` 改为 `Arc<Mutex<HashMap>>`
   - 所有操作方法加锁：`let store = self.store.lock()?;`
   - 理解 Mutex 的 RAII 锁释放
   - **学习点：** Arc 引用计数（线程安全版）、Mutex 互斥锁
-  - **技术方案：** 见 [TECH_SOLUTION.md § 4.4](docs/TECH_SOLUTION.md)
+  - **技术方案：** 见 [TECH_SOLUTION.md § 4.5](docs/TECH_SOLUTION.md)
+  - **完成摘要：** 已落地，`get`/`len` 等统一返回 `Result`，锁中毒经 `KvError::LockPoisoned` 传播
 
-- [ ] **T2.2 WAL 写前日志**
+- [x] **T2.2 WAL 写前日志** ✅
   - 定义 `WalOp` 枚举（Put / Del）
   - 用 `mpsc::channel` 创建写操作队列
   - 后台线程消费 channel，写入 WAL 文件
-  - **学习点：** std::thread::spawn、mpsc channel、生产者-消费者模式
-  - **技术方案：** 见 [TECH_SOLUTION.md § 4.5](docs/TECH_SOLUTION.md)
+  - **学习点：** std::thread::spawn、mpsc channel、生产者-消费者模式、Drop 优雅关闭
+  - **技术方案：** 见 [TECH_SOLUTION.md § 4.6](docs/TECH_SOLUTION.md)
+  - **完成摘要：** 已落地并集成进 Engine（`create_dir_all` + `data_dir/wal.log`）；`append` 错误经 `?` 传播；实现 `Drop` 优雅关闭（`Option<Sender>` + `take()` 先关 channel 再 `join`，规避 drop-order 死锁），cargo test 全过
 
 - [ ] **T2.3 后台快照线程**
   - 定时触发全量快照（thread::sleep + 循环）
@@ -271,31 +274,31 @@ rustkv stats
 
 ## 进度追踪
 
-| 任务 | 状态 | 学习点 | 备注 |
-|------|------|--------|------|
-| T1.1 | ⬜ | cargo init --lib | |
-| T1.2 | ⬜ | 泛型枚举、From/Into | |
-| T1.3 | ⬜ | Box 递归类型 | |
-| T1.4 | ⬜ | RefCell、Rc、生命周期 | |
-| T1.5 | ⬜ | 单元测试 | |
-| T2.1 | ⬜ | Arc、Mutex | |
-| T2.2 | ⬜ | thread、mpsc channel | |
-| T2.3 | ⬜ | JoinHandle | |
-| T2.4 | ⬜ | 错误恢复 | |
-| T2.5 | ⬜ | Send/Sync | |
-| T3.1 | ⬜ | async/await、tokio | |
-| T3.2 | ⬜ | tokio::spawn、定时器 | |
-| T3.3 | ⬜ | tokio::fs | |
-| T3.4 | ⬜ | tokio::sync::mpsc | |
-| T3.5 | ⬜ | select! 宏 | |
-| T3.6 | ⬜ | 异步测试 | |
-| T4.1 | ⬜ | Iterator、关联类型 | |
-| T4.2 | ⬜ | std::ops、运算符重载 | |
-| T4.3 | ⬜ | Drop trait | |
-| T4.4 | ⬜ | macro_rules! | |
-| T5.1 | ⬜ | clap（复用） | |
-| T5.2 | ⬜ | thiserror + anyhow（复用） | |
-| T5.3 | ⬜ | 集成测试（复用） | |
-| T5.4 | ⬜ | criterion 基准测试 | |
+| 任务 | 状态 | 学习点                     | 备注                                       |
+| ---- | ---- | -------------------------- | ------------------------------------------ |
+| T1.1 | ✅   | cargo init --lib           | 可编译骨架已建立                           |
+| T1.2 | ✅   | 泛型枚举、From/Into        | Display + 3 个 From 手动实现               |
+| T1.3 | ✅   | Box 递归类型               | push/pop/len/is_empty/Display              |
+| T1.4 | ✅   | RefCell、Rc、生命周期      | 已演进至 Phase 2（Arc/Mutex）              |
+| T1.5 | ✅   | 单元测试                   | 3 个测试全过                               |
+| T2.1 | ✅   | Arc、Mutex                 | Result 统一错误传播，锁中毒经 KvError 传播 |
+| T2.2 | ✅   | thread、mpsc channel       | Drop 优雅关闭，规避 drop-order 死锁        |
+| T2.3 | ⬜   | JoinHandle                 |                                            |
+| T2.4 | ⬜   | 错误恢复                   |                                            |
+| T2.5 | ⬜   | Send/Sync                  |                                            |
+| T3.1 | ⬜   | async/await、tokio         |                                            |
+| T3.2 | ⬜   | tokio::spawn、定时器       |                                            |
+| T3.3 | ⬜   | tokio::fs                  |                                            |
+| T3.4 | ⬜   | tokio::sync::mpsc          |                                            |
+| T3.5 | ⬜   | select! 宏                 |                                            |
+| T3.6 | ⬜   | 异步测试                   |                                            |
+| T4.1 | ⬜   | Iterator、关联类型         |                                            |
+| T4.2 | ⬜   | std::ops、运算符重载       |                                            |
+| T4.3 | ⬜   | Drop trait                 |                                            |
+| T4.4 | ⬜   | macro_rules!               |                                            |
+| T5.1 | ⬜   | clap（复用）               |                                            |
+| T5.2 | ⬜   | thiserror + anyhow（复用） |                                            |
+| T5.3 | ⬜   | 集成测试（复用）           |                                            |
+| T5.4 | ⬜   | criterion 基准测试         |                                            |
 
 **状态说明：** ⬜ 待开始 | 🔵 进行中 | ✅ 已完成 | ⏸ 暂停

@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::{cell::RefCell, rc::Rc};
+use std::sync::{Arc, Mutex};
 
 use std::time::Duration;
 
+use crate::error::KvError;
 use crate::models::{Entry, Value};
+use crate::wal::{Wal, WalOp};
 use dirs::home_dir;
 
 pub struct Config {
@@ -26,50 +28,104 @@ impl Default for Config {
 }
 
 pub struct Engine {
-    store: RefCell<HashMap<String, Entry>>,
-    config: Rc<Config>,
+    store: Arc<Mutex<HashMap<String, Entry>>>,
+    // Phase 后续（TTL 后台清理、快照/恢复）将使用配置；当前暂未被读取
+    #[allow(dead_code)]
+    config: Arc<Config>,
+    wal: Option<Wal>,
 }
 
 impl Engine {
-    pub fn new(config: Config) -> Self {
-        Engine {
-            store: RefCell::new(HashMap::new()),
-            config: Rc::new(config),
+    pub fn new(config: Config) -> Result<Self, KvError> {
+        let wal = if config.wal_enabled {
+            std::fs::create_dir_all(&config.data_dir)?;
+            Some(Wal::new(config.data_dir.join("wal.log")))
+        } else {
+            None
+        };
+        Ok(Engine {
+            store: Arc::new(Mutex::new(HashMap::new())),
+            config: Arc::new(config),
+            wal,
+        })
+    }
+
+    pub fn put(&self, key: &str, value: Value, ttl: Option<Duration>) -> Result<(), KvError> {
+        if let Some(w) = &self.wal {
+            let op = WalOp::Put {
+                key: key.to_string(),
+                value: value.clone(),
+                ttl_secs: ttl.map(|d| d.as_secs()),
+            };
+            w.append(op)?;
         }
-    }
-
-    pub fn put(&self, key: &str, value: Value, ttl: Option<Duration>) {
         let entry = Entry::new(value, ttl);
-
-        self.store.borrow_mut().insert(key.to_string(), entry);
+        let mut store = self.store.lock()?;
+        store.insert(key.to_string(), entry);
+        Ok(())
     }
 
-    pub fn get(&self, key: &str) -> Option<Value> {
-        let store = self.store.borrow();
-        store.get(key).and_then(|entry| {
+    pub fn get(&self, key: &str) -> Result<Option<Value>, KvError> {
+        let store = self.store.lock()?;
+        let res = store.get(key).and_then(|entry| {
             if entry.is_expired() {
                 None
             } else {
                 Some(entry.value.clone())
             }
-        })
+        });
+        Ok(res)
     }
-    pub fn del(&self, key: &str) -> bool {
-        self.store.borrow_mut().remove(key).is_some()
+    pub fn del(&self, key: &str) -> Result<bool, KvError> {
+        if let Some(w) = &self.wal {
+            let op = WalOp::Del {
+                key: key.to_string(),
+            };
+            w.append(op)?;
+        }
+        let mut store = self.store.lock()?;
+
+        Ok(store.remove(key).is_some())
     }
 
-    pub fn len(&self) -> usize {
-        self.store.borrow().len()
+    pub fn len(&self) -> Result<usize, KvError> {
+        let store = self.store.lock()?;
+
+        Ok(store.len())
     }
 
-    pub fn keys(&self, pattern: &str) -> Vec<String> {
-        let store = self.store.borrow();
+    pub fn keys(&self, pattern: &str) -> Result<Vec<String>, KvError> {
+        let store = self.store.lock()?;
         let filtered_keys = store
             .keys()
             .filter(|k| k.starts_with(pattern))
             .cloned()
             .collect();
-        filtered_keys
+        Ok(filtered_keys)
+    }
+    pub fn concurrent_put(
+        engine: &Engine,
+        entries: Vec<(String, Value)>,
+    ) -> Result<Vec<std::thread::JoinHandle<()>>, KvError> {
+        entries
+            .into_iter()
+            .map(|(key, value)| {
+                if let Some(wal) = &engine.wal {
+                    wal.append(WalOp::Put {
+                        key: key.clone(),
+                        value: value.clone(),
+                        ttl_secs: None,
+                    })?;
+                }
+                let store = Arc::clone(&engine.store);
+
+                // 闭包用了 ?，返回类型是 Result：spawn 的结果必须包 Ok()
+                Ok(std::thread::spawn(move || {
+                    let mut s = store.lock().unwrap();
+                    s.insert(key, Entry::new(value, None));
+                }))
+            })
+            .collect()
     }
 }
 
@@ -77,14 +133,48 @@ impl Engine {
 pub mod tests {
     use crate::engine::{Config, Engine};
     use crate::models::Value;
+    use std::time::Duration;
 
     #[test]
     fn test_engine() {
-        let engine = Engine::new(Config::default());
-        engine.put("name", Value::from("RustKV"), None);
-        assert_eq!(engine.get("name"), Some(Value::String("RustKV".into())));
-        engine.put("count", Value::from(42i64), None);
-        engine.del("name");
-        assert_eq!(engine.len(), 1);
+        let temp_dir = std::env::temp_dir().join("rustkv.test");
+        let config = Config {
+            data_dir: temp_dir.clone(),
+            wal_enabled: true,
+            ttl_check_interval: Duration::from_secs(1),
+        };
+        let engine = Engine::new(config).unwrap();
+        engine.put("name", Value::from("RustKV"), None).unwrap();
+        assert_eq!(
+            engine.get("name").unwrap(),
+            Some(Value::String("RustKV".into()))
+        );
+        engine.put("count", Value::from(42i64), None).unwrap();
+        engine.del("name").unwrap();
+        assert_eq!(engine.len().unwrap(), 1);
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn test_concurrent_put_with_wal() {
+        let temp_dir = std::env::temp_dir().join("rustkv.test.concurrent");
+        let config = Config {
+            data_dir: temp_dir.clone(),
+            wal_enabled: true,
+            ttl_check_interval: Duration::from_secs(1),
+        };
+        let engine = Engine::new(config).unwrap();
+        let entries: Vec<(String, Value)> = (0..10)
+            .map(|i| (format!("key{i}"), Value::from(i as i64)))
+            .collect();
+        let handles = Engine::concurrent_put(&engine, entries).unwrap();
+        for h in handles {
+            h.join().unwrap();
+        }
+        assert_eq!(engine.len().unwrap(), 10);
+        // WAL 已记录（主线程串行 append），文件应存在且非空
+        let wal_path = temp_dir.join("wal.log");
+        assert!(wal_path.exists());
+        let _ = std::fs::remove_dir_all(temp_dir);
     }
 }

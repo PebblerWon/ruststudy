@@ -1,10 +1,12 @@
-#[derive(Debug, Clone, PartialEq)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Node {
     pub value: String,
     pub next: Option<Box<Node>>,
 }
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 
 pub struct LinkedList {
     head: Option<Box<Node>>,
@@ -61,7 +63,7 @@ impl LinkedList {
 
             while let Some(node) = tail {
                 let next = &node.next;
-                if (next.is_none()) {
+                if next.is_none() {
                     node.next = Some(n);
                     self.len += 1;
                     return self.len;

@@ -1,7 +1,9 @@
+use serde::{Deserialize, Serialize};
+
 use crate::models::linked_list::LinkedList;
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Value {
     String(String),
     Integer(i64),

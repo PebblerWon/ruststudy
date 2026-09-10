@@ -4,34 +4,34 @@
 
 ### 1.1 核心依赖
 
-| 类别 | 库 | 版本 | 用途 | myapp 是否用过 |
-|------|-----|------|------|---------------|
-| 异步运行时 | `tokio` | 1.x (full) | async runtime、定时器、异步 IO | ❌ 新学 |
-| CLI 解析 | `clap` | 4.x (derive) | 命令行参数解析 | ✅ 复用 |
-| 序列化 | `serde` + `serde_json` | 1.x | 快照/WAL 序列化 | ✅ 复用 |
-| 时间 | `chrono` | 0.4.x | 日志时间戳 | ✅ 复用 |
-| 错误(应用) | `anyhow` | 1.x | 应用层错误处理 | ✅ 复用 |
-| 错误(库) | `thiserror` | 1.x | 库层错误类型 | ✅ 复用 |
-| 目录 | `dirs` | 5.x | 获取 home 目录 | ✅ 复用 |
-| 基准测试 | `criterion` | 0.5.x (dev) | 性能基准测试 | ❌ 新学 |
+| 类别       | 库                     | 版本         | 用途                           | myapp 是否用过 |
+| ---------- | ---------------------- | ------------ | ------------------------------ | -------------- |
+| 异步运行时 | `tokio`                | 1.x (full)   | async runtime、定时器、异步 IO | ❌ 新学        |
+| CLI 解析   | `clap`                 | 4.x (derive) | 命令行参数解析                 | ✅ 复用        |
+| 序列化     | `serde` + `serde_json` | 1.x          | 快照/WAL 序列化                | ✅ 复用        |
+| 时间       | `chrono`               | 0.4.x        | 日志时间戳                     | ✅ 复用        |
+| 错误(应用) | `anyhow`               | 1.x          | 应用层错误处理                 | ✅ 复用        |
+| 错误(库)   | `thiserror`            | 1.x          | 库层错误类型                   | ✅ 复用        |
+| 目录       | `dirs`                 | 5.x          | 获取 home 目录                 | ✅ 复用        |
+| 基准测试   | `criterion`            | 0.5.x (dev)  | 性能基准测试                   | ❌ 新学        |
 
 ### 1.2 标准库重点模块（学习目标）
 
-| 模块 | 学习内容 | 对应阶段 |
-|------|---------|---------|
-| `std::boxed::Box` | 堆分配、递归类型 | Phase 1 |
-| `std::rc::Rc` | 引用计数、共享只读 | Phase 1 |
-| `std::cell::RefCell` | 内部可变性、运行时借用检查 | Phase 1 |
-| `std::sync::Arc` | 线程安全引用计数 | Phase 2 |
-| `std::sync::Mutex` | 互斥锁、RAII 锁释放 | Phase 2 |
-| `std::thread` | 线程创建、JoinHandle | Phase 2 |
-| `std::sync::mpsc` | 通道、生产者-消费者 | Phase 2 |
-| `std::marker::{Send, Sync}` | 线程安全标记 trait | Phase 2 |
-| `std::ops` | 运算符重载 (Add 等) | Phase 4 |
-| `std::iter::Iterator` | 自定义迭代器、关联类型 | Phase 4 |
-| `std::ops::Drop` | 析构、RAII 资源清理 | Phase 4 |
-| `std::convert::{From, Into}` | 类型转换 trait | Phase 1 |
-| `macro_rules!` | 声明式宏 | Phase 4 |
+| 模块                         | 学习内容                   | 对应阶段 |
+| ---------------------------- | -------------------------- | -------- |
+| `std::boxed::Box`            | 堆分配、递归类型           | Phase 1  |
+| `std::rc::Rc`                | 引用计数、共享只读         | Phase 1  |
+| `std::cell::RefCell`         | 内部可变性、运行时借用检查 | Phase 1  |
+| `std::sync::Arc`             | 线程安全引用计数           | Phase 2  |
+| `std::sync::Mutex`           | 互斥锁、RAII 锁释放        | Phase 2  |
+| `std::thread`                | 线程创建、JoinHandle       | Phase 2  |
+| `std::sync::mpsc`            | 通道、生产者-消费者        | Phase 2  |
+| `std::marker::{Send, Sync}`  | 线程安全标记 trait         | Phase 2  |
+| `std::ops`                   | 运算符重载 (Add 等)        | Phase 4  |
+| `std::iter::Iterator`        | 自定义迭代器、关联类型     | Phase 4  |
+| `std::ops::Drop`             | 析构、RAII 资源清理        | Phase 4  |
+| `std::convert::{From, Into}` | 类型转换 trait             | Phase 1  |
+| `macro_rules!`               | 声明式宏                   | Phase 4  |
 
 ### 1.3 Cargo.toml 配置参考
 
@@ -102,19 +102,19 @@ rustkv/
 
 ### 各文件职责与学习重点
 
-| 文件 | 职责 | 学习重点 |
-|------|------|---------|
-| `models/value.rs` | Value 枚举定义 | 泛型、From/Into 手动实现、运算符重载 |
-| `models/linked_list.rs` | 链表数据结构 | Box 递归类型、Option 链式操作 |
-| `models/entry.rs` | 键值条目 | Instant 时间处理、TTL 判定 |
-| `engine.rs` | 核心存储引擎 | RefCell→Arc<Mutex> 演进、所有权设计 |
-| `wal.rs` | 写前日志 | mpsc channel → async channel 演进 |
-| `ttl.rs` | 过期清理 | tokio::spawn、async timer、select! |
-| `snapshot.rs` | 快照持久化 | serde 序列化、文件 IO |
-| `scanner.rs` | 范围扫描 | 自定义 Iterator、关联类型 |
-| `error.rs` | 错误类型 | thiserror（复用 myapp 技能） |
-| `macros.rs` | 宏定义 | macro_rules!、片段说明符 |
-| `cli.rs` | CLI 定义 | clap derive（复用 myapp 技能） |
+| 文件                    | 职责           | 学习重点                             |
+| ----------------------- | -------------- | ------------------------------------ |
+| `models/value.rs`       | Value 枚举定义 | 泛型、From/Into 手动实现、运算符重载 |
+| `models/linked_list.rs` | 链表数据结构   | Box 递归类型、Option 链式操作        |
+| `models/entry.rs`       | 键值条目       | Instant 时间处理、TTL 判定           |
+| `engine.rs`             | 核心存储引擎   | RefCell→Arc<Mutex> 演进、所有权设计  |
+| `wal.rs`                | 写前日志       | mpsc channel → async channel 演进    |
+| `ttl.rs`                | 过期清理       | tokio::spawn、async timer、select!   |
+| `snapshot.rs`           | 快照持久化     | serde 序列化、文件 IO                |
+| `scanner.rs`            | 范围扫描       | 自定义 Iterator、关联类型            |
+| `error.rs`              | 错误类型       | thiserror（复用 myapp 技能）         |
+| `macros.rs`             | 宏定义         | macro_rules!、片段说明符             |
+| `cli.rs`                | CLI 定义       | clap derive（复用 myapp 技能）       |
 
 ---
 
@@ -488,19 +488,40 @@ use std::sync::{Arc, Mutex};
 pub struct Engine {
     store: Arc<Mutex<HashMap<String, Entry>>>,
     config: Arc<Config>,
+    wal: Option<Wal>,  // 写前日志：先记 WAL 再改内存（Write-Ahead Log 语义）
 }
 
 impl Engine {
-    pub fn new(config: Config) -> Self {
-        Self {
+    pub fn new(config: Config) -> Result<Self, KvError> {
+        let wal = if config.wal_enabled {
+            // WAL 文件放在 data_dir 目录内；目录必须先创建——
+            // OpenOptions::create(true) 只创建文件，不会创建父目录
+            std::fs::create_dir_all(&config.data_dir)?;
+            Some(Wal::new(config.data_dir.join("wal.log")))
+        } else {
+            None
+        };
+        Ok(Engine {
             store: Arc::new(Mutex::new(HashMap::new())),
             config: Arc::new(config),
-        }
+            wal,
+        })
+        // 构造函数可能失败（建目录/初始化失败）→ 签名返回 Result<Self, KvError>
     }
 
     pub fn put(&self, key: &str, value: Value, ttl: Option<Duration>)
         -> Result<(), KvError>
     {
+        // 写前日志：先记 WAL 再改内存。ttl_secs 取秒数：
+        // Option<Duration> 是 Copy，无需 clone；小于 1 秒的 TTL 取整为 0
+        if let Some(w) = &self.wal {
+            let op = WalOp::Put {
+                key: key.to_string(),
+                value: value.clone(),
+                ttl_secs: ttl.map(|d| d.as_secs()),
+            };
+            w.append(op)?;
+        }
         let entry = Entry::new(value, ttl);
         // lock() 返回 LockResult<MutexGuard>，? 传播 PoisonError
         let mut store = self.store.lock()?;
@@ -518,6 +539,9 @@ impl Engine {
     }
 
     pub fn del(&self, key: &str) -> Result<bool, KvError> {
+        if let Some(w) = &self.wal {
+            w.append(WalOp::Del { key: key.to_string() })?;
+        }
         let mut store = self.store.lock()?;
         Ok(store.remove(key).is_some())
     }
@@ -526,38 +550,50 @@ impl Engine {
         Ok(self.store.lock()?.len())
     }
 
-    /// 多线程并发写入示例
+    /// 多线程批量写入：WAL 在主线程串行追加（保证日志全序），
+    /// 内存写入并发执行。任一条 WAL 追加失败 → 整批短路返回 Err
+    /// （Iterator::collect 到 Result 的短路：后续条目不再 spawn）
     pub fn concurrent_put(
         engine: &Engine,
         entries: Vec<(String, Value)>,
-    ) -> Vec<std::thread::JoinHandle<()>> {
+    ) -> Result<Vec<std::thread::JoinHandle<()>>, KvError> {
         entries.into_iter().map(|(key, value)| {
+            // map 闭包在主线程执行（map 惰性，由 collect 驱动），
+            // 可直接借用 &engine.wal，且 ? 可向调用方传播
+            if let Some(wal) = &engine.wal {
+                wal.append(WalOp::Put {
+                    key: key.clone(),
+                    value: value.clone(),
+                    ttl_secs: None,
+                })?;   // 日志失败则整批失败：WAL 核心不变量「内存不能领先于日志」
+            }
             let store = Arc::clone(&engine.store);  // Arc::clone 增加引用计数
-            std::thread::spawn(move || {
+            // 闭包用了 ?，返回类型是 Result：spawn 的结果必须包 Ok()
+            Ok(std::thread::spawn(move || {
                 let mut s = store.lock().unwrap();
                 s.insert(key, Entry::new(value, None));
-            })
+            }))
             // store 的 Arc 引用计数在闭包结束时 -1
-        }).collect()
+        }).collect() // collect 到 Result<Vec<_>, _>：遇第一个 Err 短路
     }
 }
 ```
 
 **对比表：**
 
-| 特性 | RefCell | Mutex | RwLock |
-|------|---------|-------|--------|
-| 借用检查 | 运行时 panic | 阻塞等待 | 阻塞等待 |
-| 线程安全 | ❌ 单线程 | ✅ 多线程 | ✅ 多线程 |
-| 读并发 | ❌ | ❌（读也互斥） | ✅（多读并发） |
-| 适用场景 | 单线程内部可变性 | 多线程读写 | 多读少写 |
+| 特性     | RefCell          | Mutex          | RwLock         |
+| -------- | ---------------- | -------------- | -------------- |
+| 借用检查 | 运行时 panic     | 阻塞等待       | 阻塞等待       |
+| 线程安全 | ❌ 单线程        | ✅ 多线程      | ✅ 多线程      |
+| 读并发   | ❌               | ❌（读也互斥） | ✅（多读并发） |
+| 适用场景 | 单线程内部可变性 | 多线程读写     | 多读少写       |
 
-| 特性 | Rc | Arc |
-|------|-----|-----|
-| 线程安全 | ❌ 单线程 | ✅ 多线程 |
-| 计数操作 | 非原子 | 原子（CAS） |
-| Send trait | ❌ | ✅ |
-| 适用场景 | 单线程共享 | 多线程共享 |
+| 特性       | Rc         | Arc         |
+| ---------- | ---------- | ----------- |
+| 线程安全   | ❌ 单线程  | ✅ 多线程   |
+| 计数操作   | 非原子     | 原子（CAS） |
+| Send trait | ❌         | ✅          |
+| 适用场景   | 单线程共享 | 多线程共享  |
 
 **设计要点：**
 
@@ -565,6 +601,9 @@ impl Engine {
 - **Rc → Arc**：`Rc` 不是 `Send`（非线程安全），跨线程必须用 `Arc`。尝试跨线程发送 `Rc` 会编译错误——这就是 Rust 的「无畏并发」
 - **RAII 锁释放**：`MutexGuard` 在 drop 时自动释放锁，不需要手动 `unlock()`，也不会忘记释放
 - **PoisonError**：如果持有锁的线程 panic，锁会「中毒」，后续 `lock()` 返回 `Err`。用 `?` 传播
+- **批量写入与 WAL**：`concurrent_put` 的 WAL 追加放在 map 闭包内（主线程执行），而非 spawn 的线程内——单生产者保证日志全序（replay 顺序确定），且 `?` 能跨 map 传播给调用方；放进线程内则错误无法传播，只能 `let _ =` 吞掉，违背 WAL「内存不能领先于日志」的不变量
+- **collect 到 Result**：`Iterator<Item = Result<T, E>>` 可 `collect()` 成 `Result<Vec<T>, E>`（`FromIterator` 实现），遇第一个 `Err` 短路。注意两个坑：① 闭包用了 `?` 后，成功路径的最后表达式必须包 `Ok(...)`，否则闭包类型不自洽（`Item` 变不成 `Result`）编译报错；② 短路时已 spawn 的 `JoinHandle` 被丢弃（线程 detach），但线程仍会完成插入，内存与 WAL 最终一致
+- **WAL 异步落盘的取舍**：当前 `append` 是 `send` 进 channel 即返回（数据未必已落盘），严格 DB 意义上的 WAL 需要「日志 fsync 确认后才应答」，可作为 Phase 3/4 演进点（组提交 / 确认机制）
 
 ### 4.6 WAL 写前日志 (`wal.rs`)
 
@@ -573,7 +612,7 @@ impl Engine {
 #### Phase 2：std::sync::mpsc 版本
 
 ```rust
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Sender};
 use std::thread;
 use std::path::PathBuf;
 use serde::{Serialize, Deserialize};
@@ -585,7 +624,8 @@ pub enum WalOp {
 }
 
 pub struct Wal {
-    sender: Sender<WalOp>,
+    // sender 包 Option：Drop 里需要主动 take() 关闭 channel（见下方死锁陷阱）
+    sender: Option<Sender<WalOp>>,
     handle: Option<thread::JoinHandle<()>>,
 }
 
@@ -594,7 +634,9 @@ impl Wal {
         let (tx, rx) = mpsc::channel::<WalOp>();
 
         let handle = thread::spawn(move || {
-            // 后台线程：消费 channel，批量写文件
+            // 后台线程：消费 channel，逐条写文件
+            // 注意：create(true) 只创建文件，不会创建缺失的父目录，
+            // 目录需由调用方（Engine::new）先 create_dir_all
             let mut file = std::fs::OpenOptions::new()
                 .create(true)
                 .append(true)
@@ -602,22 +644,53 @@ impl Wal {
                 .expect("打开 WAL 文件失败");
 
             for op in rx {
-                // rx 是 Iterator：channel 关闭（sender 全部 drop）后迭代结束
+                // rx 是 Iterator：channel 关闭（所有 sender drop）后迭代结束
+                // 结束前 buffer 中剩余的 op 会被继续消费完（排空语义）
                 let line = serde_json::to_string(&op).expect("WAL 序列化失败");
                 writeln!(file, "{line}").expect("WAL 写入失败");
             }
         });
 
-        Self { sender: tx, handle: Some(handle) }
+        Self { sender: Some(tx), handle: Some(handle) }
     }
 
     pub fn append(&self, op: WalOp) -> Result<(), KvError> {
-        self.sender.send(op).map_err(|_| KvError::WalClosed)
+        // as_ref() + ok_or：sender 已被 Drop take() 后返回 WalClosed
+        self.sender.as_ref().ok_or(KvError::WalClosed)?
+            .send(op).map_err(|_| KvError::WalClosed)
         // send 是非阻塞的：放入 channel buffer 后立即返回
         // 实际写文件由后台线程异步完成
     }
 }
+
+impl Drop for Wal {
+    fn drop(&mut self) {
+        // ① 先 take() 掉 sender：drop 最后一个 Sender → channel 关闭
+        //    （必须先于 join！否则 join 会永久死锁，见下方陷阱说明）
+        self.sender.take();
+        // ② 再 join：等待后台线程把 buffer 中剩余 op 全部落盘后退出
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
+}
 ```
+
+#### ⚠️ 陷阱：`Drop` 中的 `join` 死锁（drop-order）
+
+**错误写法**：`Drop` 里直接 `handle.join()` 而不先关闭 channel。
+
+**死锁成因**：Rust 的 drop 顺序是先执行 `Drop::drop()` 方法体，**之后**才按声明顺序 drop 字段。所以 `join()` 执行时 `sender` 字段还活着：
+
+```text
+join() 要返回   ⟶  需要后台线程退出
+后台线程退出    ⟶  需要 for op in rx 结束
+for 循环结束    ⟶  需要所有 Sender 被 drop
+sender 被 drop  ⟶  需要 Drop::drop 返回
+Drop::drop 返回 ⟶  需要 join() 返回      ← 环闭合，永久死锁
+```
+
+**修法**：`sender` 包一层 `Option`，在 `Drop::drop` 里先 `take()`（在 `&mut self` 上取走字段所有权的唯一安全手段），再 `join`。这也是「后台线程 + channel + 优雅关闭」的标准套路：**要在 Drop 里 join 消费线程，必须先在 Drop 内部显式关闭 channel**。
 
 #### Phase 3：tokio::sync::mpsc 版本
 
@@ -662,19 +735,20 @@ impl AsyncWal {
 
 **对比表：**
 
-| 特性 | std::sync::mpsc | tokio::sync::mpsc |
-|------|----------------|-------------------|
-| 阻塞模型 | 阻塞 OS 线程 | 不阻塞线程（await 让出执行权） |
-| buffer | 无界（默认） | 有界（需指定容量） |
-| send 满时 | 立即返回（无界） | await 等待（背压） |
-| recv 空时 | 阻塞线程 | await 挂起 task |
-| 适用场景 | OS 线程 | async task |
-| 关闭检测 | `for op in rx` 迭代结束 | `rx.recv().await` 返回 `None` |
+| 特性      | std::sync::mpsc         | tokio::sync::mpsc              |
+| --------- | ----------------------- | ------------------------------ |
+| 阻塞模型  | 阻塞 OS 线程            | 不阻塞线程（await 让出执行权） |
+| buffer    | 无界（默认）            | 有界（需指定容量）             |
+| send 满时 | 立即返回（无界）        | await 等待（背压）             |
+| recv 空时 | 阻塞线程                | await 挂起 task                |
+| 适用场景  | OS 线程                 | async task                     |
+| 关闭检测  | `for op in rx` 迭代结束 | `rx.recv().await` 返回 `None`  |
 
 **设计要点：**
 
 - **mpsc** = Multiple Producer, Single Consumer：多个发送者，一个消费者
 - **channel 关闭**：所有 `Sender` drop 后，`Receiver` 的迭代/recv 会自然结束
+- **优雅关闭**：`Wal` 实现 `Drop`，先 `take()` 关闭 channel 再 `join`，保证 buffer 中剩余 op 全部落盘（注意 drop-order 死锁陷阱，见 §4.6 Phase 2 陷阱说明）
 - **有界 vs 无界**：异步 channel 默认有界（背压保护），同步 channel 默认无界（可能内存泄漏）
 
 ### 4.7 TTL 过期管理 (`ttl.rs`)
@@ -900,25 +974,25 @@ macro_rules! log_kv {
 
 **宏语法解析：**
 
-| 语法 | 含义 |
-|------|------|
-| `$name:expr` | 匹配一个表达式，绑定为 `name` |
-| `$($x:tt),*` | 匹配零或多个 token tree，逗号分隔 |
-| `$(),* $(,)?` | 支持尾随逗号 |
-| `$($...)*` | 重复展开 |
-| `#[macro_export]` | 导出宏供外部 crate 使用 |
+| 语法              | 含义                              |
+| ----------------- | --------------------------------- |
+| `$name:expr`      | 匹配一个表达式，绑定为 `name`     |
+| `$($x:tt),*`      | 匹配零或多个 token tree，逗号分隔 |
+| `$(),* $(,)?`     | 支持尾随逗号                      |
+| `$($...)*`        | 重复展开                          |
+| `#[macro_export]` | 导出宏供外部 crate 使用           |
 
 **片段说明符参考：**
 
-| 说明符 | 匹配内容 | 示例 |
-|--------|---------|------|
-| `expr` | 表达式 | `1 + 2`, `foo()` |
-| `tt` | 单个 token tree | 任何语法单元 |
-| `ident` | 标识符 | `foo`, `bar` |
-| `ty` | 类型 | `String`, `&'a str` |
-| `block` | 代码块 | `{ ... }` |
-| `literal` | 字面量 | `42`, `"hello"` |
-| `pat` | 模式 | `Some(x)` |
+| 说明符    | 匹配内容        | 示例                |
+| --------- | --------------- | ------------------- |
+| `expr`    | 表达式          | `1 + 2`, `foo()`    |
+| `tt`      | 单个 token tree | 任何语法单元        |
+| `ident`   | 标识符          | `foo`, `bar`        |
+| `ty`      | 类型            | `String`, `&'a str` |
+| `block`   | 代码块          | `{ ... }`           |
+| `literal` | 字面量          | `42`, `"hello"`     |
+| `pat`     | 模式            | `Some(x)`           |
 
 **设计要点：**
 
@@ -1010,25 +1084,25 @@ Vec 是连续内存数组，在头部插入需要 O(n) 移动元素；LinkedList
 
 ### 7.1 单元测试
 
-| 模块 | 测试内容 | 学习重点 |
-|------|---------|---------|
-| `models/value.rs` | From 转换、Add 运算符、Display | 泛型测试、运算符重载测试 |
-| `models/linked_list.rs` | push/pop/len、空链表边界 | Box 递归类型测试 |
-| `engine.rs` | put/get/del、TTL 过期、并发写入 | RefCell/Mutex 测试 |
-| `wal.rs` | 写入 + 恢复、channel 关闭 | 多线程测试 |
-| `scanner.rs` | 前缀匹配、空结果、迭代器组合 | Iterator 测试 |
-| `macros.rs` | kv! 宏展开正确 | 宏测试 |
+| 模块                    | 测试内容                          | 学习重点                        |
+| ----------------------- | --------------------------------- | ------------------------------- |
+| `models/value.rs`       | From 转换、Add 运算符、Display    | 泛型测试、运算符重载测试        |
+| `models/linked_list.rs` | push/pop/len、空链表边界          | Box 递归类型测试                |
+| `engine.rs`             | put/get/del、TTL 过期、并发写入   | RefCell/Mutex 测试              |
+| `wal.rs`                | 写入、channel 关闭、Drop 优雅关闭 | 多线程测试、drop-order 死锁陷阱 |
+| `scanner.rs`            | 前缀匹配、空结果、迭代器组合      | Iterator 测试                   |
+| `macros.rs`             | kv! 宏展开正确                    | 宏测试                          |
 
 ### 7.2 集成测试
 
-| 场景 | 测试方式 |
-|------|---------|
-| CLI 正常路径 | assert_cmd（复用 myapp 模式） |
-| 并发写入一致性 | 多线程 + 验证键数量 |
-| TTL 过期 | tokio::time::sleep + 验证 None |
-| WAL 恢复 | 写入 → 重新加载 → 验证数据 |
-| 快照恢复 | 持久化 → 重新加载 → 验证数据 |
-| MERGE 运算符 | 不同类型合并 + 类型不匹配错误 |
+| 场景           | 测试方式                       |
+| -------------- | ------------------------------ |
+| CLI 正常路径   | assert_cmd（复用 myapp 模式）  |
+| 并发写入一致性 | 多线程 + 验证键数量            |
+| TTL 过期       | tokio::time::sleep + 验证 None |
+| WAL 恢复       | 写入 → 重新加载 → 验证数据     |
+| 快照恢复       | 持久化 → 重新加载 → 验证数据   |
+| MERGE 运算符   | 不同类型合并 + 类型不匹配错误  |
 
 ### 7.3 基准测试（Phase 5 可选）
 
@@ -1036,7 +1110,8 @@ Vec 是连续内存数组，在头部插入需要 O(n) 移动元素；LinkedList
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
 fn bench_put(c: &mut Criterion) {
-    let engine = Engine::new(Config::default());
+    // Engine::new 返回 Result（可能建目录失败）
+    let engine = Engine::new(Config::default()).expect("初始化 Engine 失败");
     c.bench_function("put", |b| {
         b.iter(|| {
             engine.put(black_box("key"), Value::from("value"), None);
@@ -1052,30 +1127,30 @@ criterion_main!(benches);
 
 ## 8. 学习要点完整映射表
 
-| Rust 概念 | RustKV 中的位置 | 阶段 | 学习深度 |
-|-----------|----------------|------|---------|
-| 泛型函数/结构体 | `Value`、`Engine` | Phase 1 | ★★★ |
-| 显式生命周期 | `Engine::get` 签名设计 | Phase 1 | ★★ |
-| `Box` 智能指针 | `LinkedList::Node` | Phase 1 | ★★★ |
-| `Rc` 引用计数 | `Engine::config` | Phase 1 | ★★ |
-| `RefCell` 内部可变性 | `Engine::store` (P1) | Phase 1 | ★★★ |
-| `Arc` 线程安全引用 | `Engine::store` (P2) | Phase 2 | ★★★ |
-| `Mutex` 互斥锁 | `Engine::store` (P2) | Phase 2 | ★★★ |
-| `std::thread` | `Wal` 后台线程 | Phase 2 | ★★★ |
-| `mpsc` Channel | `Wal` 写队列 | Phase 2 | ★★★ |
-| `Send`/`Sync` | 并发测试验证 | Phase 2 | ★★ |
-| `async`/`await` | TTL、WAL 异步版 | Phase 3 | ★★★ |
-| tokio runtime | `#[tokio::main]` | Phase 3 | ★★★ |
-| `tokio::spawn` | TTL 清理任务 | Phase 3 | ★★★ |
-| `tokio::time` | TTL 定时器 | Phase 3 | ★★ |
-| `tokio::fs` | 异步 WAL 写入 | Phase 3 | ★★ |
-| `tokio::sync::mpsc` | 异步 channel | Phase 3 | ★★★ |
-| `select!` 宏 | TTL 多路复用 | Phase 3 | ★★★ |
-| 自定义 `Iterator` | `ScanIterator` | Phase 4 | ★★★ |
-| 关联类型 | `Iterator::Item` | Phase 4 | ★★ |
-| 运算符重载 | `Value: Add` | Phase 4 | ★★★ |
-| `Drop` trait | `Engine::drop` | Phase 4 | ★★ |
-| `From`/`Into` 手动实现 | `Value: From<&str>` | Phase 1 | ★★ |
-| `macro_rules!` | `kv!` / `log_kv!` | Phase 4 | ★★ |
+| Rust 概念              | RustKV 中的位置        | 阶段    | 学习深度 |
+| ---------------------- | ---------------------- | ------- | -------- |
+| 泛型函数/结构体        | `Value`、`Engine`      | Phase 1 | ★★★      |
+| 显式生命周期           | `Engine::get` 签名设计 | Phase 1 | ★★       |
+| `Box` 智能指针         | `LinkedList::Node`     | Phase 1 | ★★★      |
+| `Rc` 引用计数          | `Engine::config`       | Phase 1 | ★★       |
+| `RefCell` 内部可变性   | `Engine::store` (P1)   | Phase 1 | ★★★      |
+| `Arc` 线程安全引用     | `Engine::store` (P2)   | Phase 2 | ★★★      |
+| `Mutex` 互斥锁         | `Engine::store` (P2)   | Phase 2 | ★★★      |
+| `std::thread`          | `Wal` 后台线程         | Phase 2 | ★★★      |
+| `mpsc` Channel         | `Wal` 写队列           | Phase 2 | ★★★      |
+| `Send`/`Sync`          | 并发测试验证           | Phase 2 | ★★       |
+| `async`/`await`        | TTL、WAL 异步版        | Phase 3 | ★★★      |
+| tokio runtime          | `#[tokio::main]`       | Phase 3 | ★★★      |
+| `tokio::spawn`         | TTL 清理任务           | Phase 3 | ★★★      |
+| `tokio::time`          | TTL 定时器             | Phase 3 | ★★       |
+| `tokio::fs`            | 异步 WAL 写入          | Phase 3 | ★★       |
+| `tokio::sync::mpsc`    | 异步 channel           | Phase 3 | ★★★      |
+| `select!` 宏           | TTL 多路复用           | Phase 3 | ★★★      |
+| 自定义 `Iterator`      | `ScanIterator`         | Phase 4 | ★★★      |
+| 关联类型               | `Iterator::Item`       | Phase 4 | ★★       |
+| 运算符重载             | `Value: Add`           | Phase 4 | ★★★      |
+| `Drop` trait           | `Engine::drop`         | Phase 4 | ★★       |
+| `From`/`Into` 手动实现 | `Value: From<&str>`    | Phase 1 | ★★       |
+| `macro_rules!`         | `kv!` / `log_kv!`      | Phase 4 | ★★       |
 
 > ★ = 了解概念，★★ = 能独立实现，★★★ = 深入理解并能灵活运用
