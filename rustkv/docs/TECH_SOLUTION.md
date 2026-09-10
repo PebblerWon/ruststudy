@@ -696,7 +696,6 @@ Drop::drop 返回 ⟶  需要 join() 返回      ← 环闭合，永久死锁
 
 ```rust
 use tokio::sync::mpsc::{self, Sender};
-use tokio::fs::File;
 use tokio::io::AsyncWriteExt;
 
 pub struct AsyncWal {
@@ -710,7 +709,14 @@ impl AsyncWal {
         let (tx, mut rx) = mpsc::channel::<WalOp>(1024);
 
         let handle = tokio::spawn(async move {
-            let mut file = File::create(&path).await.expect("打开 WAL 文件失败");
+            // ⚠️ 不能用 File::create —— 它会截断已有 WAL 历史，
+            // 清空全部日志！必须与同步版一致：create + append
+            let mut file = tokio::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+                .await
+                .expect("打开 WAL 文件失败");
 
             while let Some(op) = rx.recv().await {
                 // recv().await：channel 为空时挂起 task，不阻塞线程
@@ -720,6 +726,7 @@ impl AsyncWal {
                 file.flush().await.ok();
             }
             // rx.recv() 返回 None 时结束（sender 全部 drop）
+            // 注意：recv() 会先把 buffer 剩余 op 交付完，然后才返回 None
         });
 
         Self { sender: tx, handle }
@@ -729,6 +736,18 @@ impl AsyncWal {
         self.sender.send(op).await
             .map_err(|_| KvError::WalClosed)
         // async send：如果 channel 满则 await 等待，不阻塞线程
+        // ⚠️ send 进 buffer 即返回 ≠ 已落盘（持久性分级见下方 L0-L3）
+    }
+
+    /// 优雅关闭：消费 self，先 drop sender 关闭 channel
+    /// （recv 返回 None，后台循环结束），再等后台任务把剩余 op 排空落盘。
+    /// 注意：不能用 Drop 实现同样的效果——Drop::drop 是同步上下文，
+    /// 无法 await 后台任务；在 Drop 里创建 Future 不 await 等于什么都没做
+    pub async fn close(self) {
+        // ① 先关闭 channel（drop 最后一个 Sender）
+        drop(self.sender);
+        // ② 再等待后台任务退出：保证 buffer 中剩余 op 全部落盘
+        let _ = self.handle.await;
     }
 }
 ```
@@ -748,8 +767,73 @@ impl AsyncWal {
 
 - **mpsc** = Multiple Producer, Single Consumer：多个发送者，一个消费者
 - **channel 关闭**：所有 `Sender` drop 后，`Receiver` 的迭代/recv 会自然结束
-- **优雅关闭**：`Wal` 实现 `Drop`，先 `take()` 关闭 channel 再 `join`，保证 buffer 中剩余 op 全部落盘（注意 drop-order 死锁陷阱，见 §4.6 Phase 2 陷阱说明）
+- **优雅关闭**：同步版 `Wal` 实现 `Drop`（先 `take()` 关 channel 再 `join`，注意 drop-order 死锁陷阱，见 §4.6 Phase 2）；**async 版不能用 Drop**（drop 不能 await，在 Drop 里创建 Future 不 await 等于没执行），必须显式 `close(self)`：① `drop(self.sender)` 关闭 channel → ② `self.handle.await` 等后台任务排空落盘。Engine 层包装 `close(self)` 供调用方在退出前调用
+- **runtime drop 会取消任务**：`#[tokio::test]` 默认 current-thread runtime，测试结束 → runtime drop → 所有 spawned 任务被强制取消（不是等它们跑完）。实测 WAL 后台任务未关闭时，断言 `wal_path.exists()` 约 40% 概率偶发失败——后台任务的产出断言前必须先 `close()`
+- **`Sender::closed()` 语义陷阱**：它等的是「所有 **Receiver** 被 drop」，而 Receiver 被后台任务持有；想等后台任务退出应该关 **Sender** 并 `handle.await`，方向反了会自死锁
+- **WAL 异步落盘的取舍**：当前 `append` 在 op 进入 channel buffer 后即返回确认，后台任务实际写盘。吞吐高，但存在「丢数据窗口」——进程崩溃时 buffer 中未落盘的 op 全部丢失，内存可能领先于磁盘日志。分级方案见下方「持久性分级 L0→L3」
 - **有界 vs 无界**：异步 channel 默认有界（背压保护），同步 channel 默认无界（可能内存泄漏）
+
+#### 持久性分级 L0→L3：「丢数据窗口」显式化
+
+WAL 的核心是两条不变量：
+
+| 不变量                                | 含义                                             | 当前 AsyncWal 实现                                             |
+| ------------------------------------- | ------------------------------------------------ | -------------------------------------------------------------- |
+| **① 顺序性**（write-ahead）           | 内存变更前，op 必须先进入日志队列                | ✅ 满足——`append().await?` 把 op 送进 channel 后才执行内存写入 |
+| **② 持久性**（durability before ack） | 操作被确认成功（`put` 返回 Ok）时，op 必须已落盘 | ❌ 不满足——`send` 进 buffer 即返回，此刻 op 可能只在内存队列中 |
+
+风险场景：WAL 后台任务尚未被调度（或崩溃在写盘前）+ 内存 put 已完成 → **内存领先于磁盘日志**，崩溃重启后这些键丢失。`put` 返回的 `Ok` 承诺了它做不到的事。
+
+这不是实现错误，而是经典的吞吐/安全取舍（PostgreSQL 的 `synchronous_commit`、Kafka 的 `acks` 都有类似的档位）。关键是把档位**显式声明**：
+
+```text
+L0（当前）  send 进 buffer 即确认        → 崩溃丢 buffer 窗口
+L1  ack 式  后台写完才回执，put 才返回   → 进程崩溃安全
+L2  + fsync 回执前 sync_all               → 掉电安全
+L3  group commit 攒批写一次、批量回执      → 解决 L1/L2 的吞吐代价
+```
+
+| 机制      | 职责                                               | 边界                                     |
+| --------- | -------------------------------------------------- | ---------------------------------------- |
+| `close()` | 有序退出：给 buffer 里的 op 一个被写完的机会       | 管不住崩溃（崩溃时没有机会执行任何代码） |
+| ack（L1） | 崩溃安全：确认与落盘绑定，不存在「未落盘的已确认」 | 管不住「忘记调 close 后正常退出」的排空  |
+
+两者互补而非替代：L1 落地后 `close()` 依然需要（排空最后一次 ack 后可能还在 pipe 里的内容），丢数据窗口从「整个 buffer」缩小到「最后未 fsync 的页缓存」。
+
+#### L1 ack 式 WAL 实现骨架（T3.7 预案）
+
+核心思路：channel 载荷从 `WalOp` 升级为 `(WalOp, oneshot 回执通道)`，后台任务**写盘完成后**才回执，`append` 的 await 在此之前不解除：
+
+```rust
+use tokio::sync::{mpsc, oneshot};
+
+pub struct AsyncWal {
+    // 载荷 = (op, 回执通道)：后台写完后通过 oneshot 通知 append
+    sender: mpsc::Sender<(WalOp, oneshot::Sender<Result<(), KvError>>)>,
+    handle: tokio::task::JoinHandle<()>,
+}
+
+impl AsyncWal {
+    pub async fn append(&self, op: WalOp) -> Result<(), KvError> {
+        let (ack_tx, ack_rx) = oneshot::channel();
+        self.sender
+            .send((op, ack_tx))
+            .await
+            .map_err(|_| KvError::WalClosed)?;
+        ack_rx.await.map_err(|_| KvError::WalClosed)?
+        // ← 挂起在这里，直到后台任务 write_all 完成并回执；
+        //   append 返回 Ok 时 op 必然已写入文件
+    }
+
+    // 后台任务循环：写完才回执
+    // while let Some((op, ack)) = rx.recv().await {
+    //     let res = write_op(&mut file, &op).await;
+    //     let _ = ack.send(res);   // 回执后，put 侧的 await 才解除
+    // }
+}
+```
+
+L1 落地后，「WAL 后台任务一直没执行、内存 put 却已确认」的场景自动消解：确认本身在等后台任务完成，二者不可能脱钩。实现时会同时练到 `oneshot` channel 与 `select!` 的前置知识，且 DEV_PLAN 中「WAL 恢复」「优雅关闭」任务的语义都将因此完整。
 
 ### 4.7 TTL 过期管理 (`ttl.rs`)
 

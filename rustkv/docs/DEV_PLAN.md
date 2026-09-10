@@ -165,6 +165,13 @@ assert_eq!(engine.len()?, 10);
   - 测试 TTL 过期、并发写入
   - **学习点：** 异步测试技巧
 
+- [ ] **T3.7 WAL 持久性升级：L1 ack 式回执**
+  - channel 载荷从 `WalOp` 升级为 `(WalOp, oneshot::Sender<Result<(), KvError>>)`
+  - 后台任务写盘完成后才回执，`append` 挂起直到回执
+  - 补充测试：`put` 返回 Ok 后 wal.log 立即包含该 op（无需 close）
+  - **学习点：** oneshot channel、确认与落盘绑定、持久性分级（L0→L3）
+  - **技术方案：** 见 [TECH_SOLUTION.md § 4.6](docs/TECH_SOLUTION.md)（持久性分级与 L1 实现骨架）
+
 **阶段三验收：**
 
 ```rust
@@ -292,6 +299,7 @@ rustkv stats
 | T3.4 | ⬜   | tokio::sync::mpsc          |                                            |
 | T3.5 | ⬜   | select! 宏                 |                                            |
 | T3.6 | ⬜   | 异步测试                   |                                            |
+| T3.7 | ⬜   | oneshot channel、ack 回执  | ack 式 WAL，方案见 TECH_SOLUTION §4.6      |
 | T4.1 | ⬜   | Iterator、关联类型         |                                            |
 | T4.2 | ⬜   | std::ops、运算符重载       |                                            |
 | T4.3 | ⬜   | Drop trait                 |                                            |
