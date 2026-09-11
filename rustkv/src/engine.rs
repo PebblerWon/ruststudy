@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use crate::error::KvError;
 use crate::models::{Entry, Value};
+use crate::ttl::TtlManager;
 use crate::wal_tokio::{AsyncWal, WalOp};
 use dirs::home_dir;
 
@@ -33,6 +34,7 @@ pub struct Engine {
     #[allow(dead_code)]
     config: Arc<Config>,
     wal: Option<AsyncWal>,
+    ttl: TtlManager,
 }
 
 impl Engine {
@@ -43,10 +45,13 @@ impl Engine {
         } else {
             None
         };
+        let store = Arc::new(Mutex::new(HashMap::new()));
+        let ttl = TtlManager::spawn(Arc::clone(&store), config.ttl_check_interval);
         Ok(Engine {
-            store: Arc::new(Mutex::new(HashMap::new())),
+            store,
             config: Arc::new(config),
             wal,
+            ttl,
         })
     }
 
@@ -131,6 +136,7 @@ impl Engine {
         if let Some(wal) = self.wal {
             wal.close().await;
         }
+        self.ttl.shutdown().await;
     }
 }
 
