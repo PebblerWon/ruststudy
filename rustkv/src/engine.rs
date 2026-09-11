@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use crate::error::KvError;
 use crate::models::{Entry, Value};
+use crate::scanner::ScanIterator;
 use crate::ttl::TtlManager;
 use crate::wal_tokio::{AsyncWal, WalOp};
 use dirs::home_dir;
@@ -132,6 +133,9 @@ impl Engine {
         Ok(handles)
     }
 
+    pub fn scan(&self, prefix: &str) -> Result<ScanIterator, KvError> {
+        ScanIterator::new(self.store.clone(), prefix)
+    }
     pub async fn close(self) {
         if let Some(wal) = self.wal {
             wal.close().await;
@@ -190,6 +194,45 @@ pub mod tests {
         // WAL 已记录（主线程串行 append），文件应存在且非空
         let wal_path = temp_dir.join("wal.log");
         assert!(wal_path.exists());
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[tokio::test]
+    async fn test_scan() {
+        let temp_dir = std::env::temp_dir().join("rustkv.test.concurrent");
+        let config = Config {
+            data_dir: temp_dir.clone(),
+            wal_enabled: true,
+            ttl_check_interval: Duration::from_secs(1),
+        };
+        let engine = Engine::new(config).await.unwrap();
+        engine
+            .put("name1_1", Value::from("name1_1"), None)
+            .await
+            .unwrap();
+        engine
+            .put("name1_2", Value::from("name1_2"), None)
+            .await
+            .unwrap();
+        engine
+            .put("name2_1", Value::from("name2_1"), None)
+            .await
+            .unwrap();
+        assert_eq!(engine.len().unwrap(), 3);
+
+        let mut key_arr = vec![];
+        let _: Vec<()> = engine
+            .scan("name1")
+            .unwrap()
+            .map(|(key, _)| {
+                assert!(key.starts_with("name1"));
+                key_arr.push(key);
+            })
+            .collect();
+        println!("{:?}", key_arr);
+        assert_eq!(key_arr.len(), 2);
+        engine.close().await;
+
         let _ = std::fs::remove_dir_all(temp_dir);
     }
 }
