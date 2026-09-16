@@ -2,7 +2,6 @@ use crate::{error::KvError, models::Entry, models::Value};
 use std::collections::HashMap;
 use std::{
     sync::{Arc, Mutex},
-    time::Instant,
 };
 
 pub struct ScanIterator {

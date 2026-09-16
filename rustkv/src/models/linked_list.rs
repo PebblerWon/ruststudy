@@ -51,7 +51,7 @@ impl LinkedList {
         }
         list
     }
-    pub fn push2(&mut self, value: String) -> usize {
+    pub fn push_bak(&mut self, value: String) -> usize {
         let n = Box::new(Node { value, next: None });
 
         if self.head.is_none() {

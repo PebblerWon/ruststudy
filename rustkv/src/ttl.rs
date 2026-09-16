@@ -22,7 +22,7 @@ impl TtlManager {
                         let Ok(mut store) = store.lock() else {break};
 
                         store.retain(|_, entry|{
-                            entry.is_expired()
+                            !entry.is_expired()
                         });
                     }
 

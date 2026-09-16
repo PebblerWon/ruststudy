@@ -170,6 +170,7 @@ pub mod tests {
         engine.put("count", Value::from(42i64), None).await.unwrap();
         engine.del("name").await.unwrap();
         assert_eq!(engine.len().unwrap(), 1);
+         engine.close().await;
         let _ = std::fs::remove_dir_all(temp_dir);
     }
 
@@ -199,7 +200,7 @@ pub mod tests {
 
     #[tokio::test]
     async fn test_scan() {
-        let temp_dir = std::env::temp_dir().join("rustkv.test.concurrent");
+        let temp_dir = std::env::temp_dir().join("rustkv.test.scan");
         let config = Config {
             data_dir: temp_dir.clone(),
             wal_enabled: true,
