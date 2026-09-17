@@ -2,6 +2,18 @@
 
 ## 5.1 模块概述
 
+### quant-app/Cargo.toml 补充依赖（Phase 5）
+
+```toml
+# quant-app/Cargo.toml 追加
+
+[dependencies]
+# 继承 workspace 依赖
+polars = { workspace = true }
+thiserror = { workspace = true }
+csv = "1"                  # CSV 导出
+```
+
 ### 本阶段目标
 
 实现向量化回测引擎，基于历史 K 线数据执行策略回测，计算绩效统计并生成报告数据。
@@ -66,8 +78,8 @@
 
 use anyhow::Result;
 use polars::prelude::*;
-use crate::common::models::{Kline, Interval};
-use crate::indicators::Indicator;
+use quant_data::common::models::{Kline, Interval};
+use quant_data::indicators::Indicator;
 use crate::strategy::{Strategy, Signal};
 use super::report::{BacktestResult, BacktestConfig, TradeRecord};
 
@@ -613,8 +625,8 @@ impl BacktestReport {
 // backtest/data_loader.rs
 
 use polars::prelude::*;
-use crate::common::models::Kline;
-use crate::data::kline_store::KlineStore;
+use quant_data::common::models::Kline;
+use quant_data::data::kline_store::KlineStore;
 
 /// 从 KlineStore 加载历史数据并转换为回测所需格式
 pub struct DataLoader;
@@ -628,7 +640,7 @@ impl DataLoader {
         start_time: u64,
         end_time: u64,
     ) -> anyhow::Result<Vec<Kline>> {
-        let klines = store.get_klines(symbol, interval)?;
+        let klines = store.load_klines(symbol, interval)?;
         // 按时间范围过滤
         let filtered: Vec<Kline> = klines.into_iter()
             .filter(|k| k.open_time >= start_time && k.open_time <= end_time)
@@ -641,7 +653,7 @@ impl DataLoader {
 
     /// 将 K 线数据转换为 polars DataFrame（用于高级分析）
     pub fn to_dataframe(klines: &[Kline]) -> DataFrame {
-        let open_times: Vec<i64> = klines.iter().map(|k| k.open_time as i64).collect();
+        let open_times: Vec<i64> = klines.iter().map(|k| k.open_time).collect();
         let opens: Vec<f64> = klines.iter().map(|k| k.open).collect();
         let highs: Vec<f64> = klines.iter().map(|k| k.high).collect();
         let lows: Vec<f64> = klines.iter().map(|k| k.low).collect();

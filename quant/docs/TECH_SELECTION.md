@@ -215,7 +215,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 # 数据处理
-polars = { version = "0.46", features = ["lazy", "temporal", "describe"] }
+polars = { version = "0.46", features = ["lazy", "temporal", "parquet"] }
 chrono = { version = "0.4", features = ["serde"] }
 
 # GUI
@@ -225,6 +225,9 @@ egui_plot = "0.32"
 # 错误处理
 anyhow = "1"
 thiserror = "2"
+
+# 数据导出
+csv = "1.3"
 
 # 日志
 tracing = "0.1"
@@ -294,6 +297,7 @@ anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 futures-util = { workspace = true }
+csv = { workspace = true }
 ```
 
 ---
@@ -313,10 +317,11 @@ futures-util = { workspace = true }
 | **WebSocket** | `tokio-tungstenite` | 0.26.x | Binance 实时行情推送 | Phase 4 |
 | **异步流** | `futures-util` | 0.3.x | Stream/Sink 工具 trait | Phase 4 |
 | **错误(应用)** | `anyhow` | 1.x | 应用层错误处理 | Phase 1 |
-| **错误(库)** | `thiserror` | 2.x | 库层错误类型定义 | Phase 2 |
+| **错误(库)** | `thiserror` | 2.x | 库层错误类型定义 | Phase 1 |
 | **日志** | `tracing` | 0.1.x | 结构化日志 | Phase 1 |
 | **日志** | `tracing-subscriber` | 0.3.x | 日志输出格式化 | Phase 1 |
 | **测试** | `tokio-test` | 0.4.x | 异步测试工具 | Phase 2 |
+| **数据导出** | `csv` | 1.3.x | CSV 数据导出 | Phase 6 |
 
 ---
 

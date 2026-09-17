@@ -56,7 +56,8 @@ pub enum IndicatorOutput {
 }
 
 /// 技术指标 trait — 所有指标的公共接口
-pub trait Indicator {
+/// Send + Sync 约束确保指标可在多线程环境安全使用（如回测、实时计算）
+pub trait Indicator: Send + Sync {
     /// 指标名称（用于日志和 UI 展示）
     fn name(&self) -> &str;
 
@@ -90,6 +91,63 @@ pub enum IndicatorError {
 - 输出序列长度与输入相同，不足 `period` 的位置填充 `f64::NAN`，便于与时间轴对齐
 - `compute` 返回 `Result`，数据不足时返回明确错误而非 panic
 - trait 不绑定具体数据类型，`&[f64]` 是最通用的输入形式
+- `Send + Sync` 约束使指标对象可跨线程传递，支持并行计算
+
+### IndicatorValues 结构体
+
+指标计算结果的统一数据容器，供 UI 层、回测层、策略层消费：
+
+```rust
+// src/common/models.rs
+
+/// 指标计算结果集合
+/// 将各指标的计算结果集中存储，便于上层模块统一访问
+#[derive(Debug, Clone)]
+pub struct IndicatorValues {
+    /// 收盘价序列（基准数据）
+    pub closes: Vec<f64>,
+    /// SMA 结果（周期 → 值序列）
+    pub sma: Option<Vec<f64>>,
+    /// EMA 结果
+    pub ema: Option<Vec<f64>>,
+    /// RSI 结果
+    pub rsi: Option<Vec<f64>>,
+    /// MACD 结果（macd_line, signal_line, histogram）
+    pub macd: Option<Vec<Vec<f64>>>,
+    /// 布林带结果（upper, middle, lower）
+    pub bollinger: Option<Vec<Vec<f64>>>,
+}
+
+impl IndicatorValues {
+    /// 创建空的 IndicatorValues
+    pub fn new(closes: Vec<f64>) -> Self {
+        Self {
+            closes,
+            sma: None,
+            ema: None,
+            rsi: None,
+            macd: None,
+            bollinger: None,
+        }
+    }
+
+    /// 获取指定指标的最新值
+    pub fn latest_sma(&self) -> Option<f64> {
+        self.sma.as_ref()?.last().copied()
+    }
+
+    pub fn latest_rsi(&self) -> Option<f64> {
+        self.rsi.as_ref()?.last().copied()
+    }
+}
+```
+
+### 设计要点
+
+- `IndicatorValues` 是指标层与上层模块（UI/回测/策略）的统一接口
+- 各指标结果用 `Option` 包装，未计算时为 `None`，避免默认值误导
+- 单值指标（SMA/EMA/RSI）用 `Vec<f64>`，多值指标（MACD/布林带）用 `Vec<Vec<f64>>`
+- 提供便捷方法（如 `latest_sma()`）获取最新值，减少调用方的样板代码
 
 ---
 

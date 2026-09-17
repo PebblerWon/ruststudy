@@ -43,6 +43,19 @@ Phase 3 (ui)                    Phase 4 (realtime)
 
 ## 4.2 WebSocket 客户端
 
+### quant-data/Cargo.toml 补充依赖（Phase 4）
+
+```toml
+# quant-data/Cargo.toml 追加
+
+[dependencies]
+# 继承 workspace 依赖
+tokio-tungstenite = { workspace = true }
+futures-util = { workspace = true }
+tokio-util = "0.7"          # CancellationToken
+anyhow = { workspace = true }
+```
+
 ### WsClient 结构体
 
 ```rust
@@ -216,6 +229,9 @@ pub struct WsKlineData {
     /// 成交量
     #[serde(rename = "v")]
     pub volume: String,
+    /// 成交额
+    #[serde(rename = "q")]
+    pub quote_volume: String,
     /// 成交笔数
     #[serde(rename = "n")]
     pub trades_count: u32,
@@ -252,6 +268,12 @@ pub struct WsTicker {
     /// 24h 成交额
     #[serde(rename = "q")]
     pub quote_volume: String,
+    /// 24h 最高价
+    #[serde(rename = "h")]
+    pub high: String,
+    /// 24h 最低价
+    #[serde(rename = "l")]
+    pub low: String,
 }
 
 /// 统一 WebSocket 消息枚举
@@ -275,6 +297,9 @@ impl WsKline {
             close: k.close.parse().ok()?,
             volume: k.volume.parse().ok()?,
             close_time: k.close_time,
+            quote_volume: k.quote_volume.parse().ok()?,
+            trades_count: k.trades_count,
+            is_closed: k.is_closed,
         })
     }
 }
@@ -285,8 +310,11 @@ impl WsTicker {
         Some(crate::common::Ticker {
             symbol: self.symbol.clone(),
             price: self.last_price.parse().ok()?,
-            volume: self.volume.parse().ok()?,
-            timestamp: self.event_time,
+            volume_24h: self.volume.parse().ok()?,
+            price_change_pct: self.price_change_percent.parse().ok()?,
+            high_24h: self.high.parse().ok()?,
+            low_24h: self.low.parse().ok()?,
+            update_time: self.event_time,
         })
     }
 }

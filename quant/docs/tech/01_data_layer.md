@@ -35,54 +35,57 @@ data/            ← 本阶段新增：API 客户端、数据缓存、数据服�
 ### Cargo.toml 依赖配置（Phase 1 涉及的 crate）
 
 ```toml
+# quant-data/Cargo.toml
+
 [package]
-name = "rustquant"
+name = "quant-data"
 version = "0.1.0"
 edition = "2021"
+description = "RustQuant 数据层：数据获取、指标计算、实时行情（无 GUI 依赖）"
+
+[lib]
+name = "quant_data"
+path = "src/lib.rs"
 
 [dependencies]
-# 异步运行时
-tokio = { version = "1", features = ["full"] }
+# 继承 workspace 依赖
+tokio = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+polars = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 
-# HTTP 客户端
-reqwest = { version = "0.12", features = ["json"] }
-
-# 序列化
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-
-# 时间处理
-chrono = { version = "0.4", features = ["serde"] }
-
-# 数据处理
-polars = { version = "0.46", features = ["lazy", "temporal", "parquet"] }
-
-# 错误处理
-anyhow = "1"
-thiserror = "2"
-
-# 日志
-tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+[dev-dependencies]
+tokio-test = { workspace = true }
 ```
+
+> 注：以上依赖版本在根 Cargo.toml 的 `[workspace.dependencies]` 中统一管理，
+> 子 crate 通过 `workspace = true` 继承。详见 TECH_SELECTION.md §5.1。
 
 ### 本阶段项目目录结构
 
 ```
-src/
-├── common/
-│   ├── mod.rs           # 公共模块入口
-│   ├── error.rs         # QuantError 统一错误类型
-│   ├── config.rs        # 全局配置（API 地址、默认参数）
-│   └── models.rs        # Kline、Interval 等核心数据模型
-├── data/
-│   ├── mod.rs           # 数据层入口
-│   ├── fetcher.rs       # BinanceClient — REST API 数据获取
-│   ├── kline_store.rs   # KlineStore — 本地 Parquet 缓存
-│   └── types.rs         # Binance API 原始响应类型（serde 反序列化）
-├── main.rs              # 程序入口
-└── lib.rs               # 库入口、模块声明
+quant-data/
+├── Cargo.toml
+└── src/
+    ├── lib.rs               # 库入口、模块声明
+    ├── common/
+    │   ├── mod.rs           # 公共模块入口
+    │   ├── error.rs         # QuantError 统一错误类型
+    │   ├── config.rs        # 全局配置（API 地址、默认参数）
+    │   └── models.rs        # Kline、Interval 等核心数据模型
+    └── data/
+        ├── mod.rs           # 数据层入口
+        ├── fetcher.rs       # BinanceClient — REST API 数据获取
+        ├── kline_store.rs   # KlineStore — 本地 Parquet 缓存
+        └── types.rs         # Binance API 原始响应类型（serde 反序列化）
 ```
+
+> Phase 1 的所有模块均在 **quant-data**（library crate）中。
 
 ---
 
@@ -143,6 +146,7 @@ pub enum Interval {
     M1,   // 1 分钟
     M5,   // 5 分钟
     M15,  // 15 分钟
+    M30,  // 30 分钟
     H1,   // 1 小时
     H4,   // 4 小时
     D1,   // 1 天
@@ -156,6 +160,7 @@ impl Interval {
             Interval::M1  => "1m",
             Interval::M5  => "5m",
             Interval::M15 => "15m",
+            Interval::M30 => "30m",
             Interval::H1  => "1h",
             Interval::H4  => "4h",
             Interval::D1  => "1d",
@@ -169,6 +174,7 @@ impl Interval {
             Interval::M1  => 60_000,
             Interval::M5  => 300_000,
             Interval::M15 => 900_000,
+            Interval::M30 => 1_800_000,
             Interval::H1  => 3_600_000,
             Interval::H4  => 14_400_000,
             Interval::D1  => 86_400_000,

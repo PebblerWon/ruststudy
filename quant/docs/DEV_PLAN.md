@@ -39,8 +39,8 @@
   - **产出：** quant-data/src/data/fetcher.rs | **学习点：** reqwest 异步 HTTP、async_trait
   - **技术方案：** 见 [tech/01_data_layer.md § 1.4](tech/01_data_layer.md)
 
-- [ ] **T1.4 数据持久化** — KlineStore 内存缓存 + JSON 文件存储（`{symbol}/{interval}.json`），放入 **quant-data**
-  - **产出：** quant-data/src/data/kline_store.rs | **学习点：** 文件 I/O、serde_json、缓存策略
+- [ ] **T1.4 数据持久化** — KlineStore Parquet 文件存储（`{symbol}/{interval}.parquet`），放入 **quant-data**
+  - **产出：** quant-data/src/data/kline_store.rs | **学习点：** 文件 I/O、polars Parquet 读写、缓存策略
   - **技术方案：** 见 [tech/01_data_layer.md § 1.5](tech/01_data_layer.md)
 
 - [ ] **T1.5 数据层测试** — 在 **quant-data** 内编写单元测试 + tests/data_tests.rs 集成测试，mock HTTP 验证解析、缓存命中/未命中
@@ -65,7 +65,7 @@
   - **技术方案：** 见 [tech/02_indicator_layer.md § 2.3](tech/02_indicator_layer.md)
 
 - [ ] **T2.3 RSI 与 MACD** — RS 比值平滑(RSI) + DIF/DEA/柱状图(MACD, IndicatorOutput::Multi)
-  - **产出：** quant-data/src/indicators/rsi.rs + macd.rs | **学习点：** 复杂数值算法、HashMap 多值输出
+  - **产出：** quant-data/src/indicators/rsi.rs + macd.rs | **学习点：** 复杂数值算法、IndicatorOutput::Multi 多值输出
   - **技术方案：** 见 [tech/02_indicator_layer.md § 2.4-2.5](tech/02_indicator_layer.md)
 
 - [ ] **T2.4 布林带** — 中轨(SMA) + 上轨(+2σ) + 下轨(-2σ)
@@ -172,16 +172,16 @@
 > 目标：策略框架 + 内置策略 + 模拟交易 + 数据导出（quant-app，完整系统集成）
 > 补强：设计模式(Strategy)、模块化、完整系统集成
 
-- [ ] **T6.1 Strategy trait 框架** — Strategy trait(name + generate_signal)、Signal 枚举、`Box<dyn Strategy>` 动态分发，放入 **quant-app**
+- [ ] **T6.1 Strategy trait 框架** — Strategy trait(name + default_params + init + on_kline + reset)、Signal 枚举、`Box<dyn Strategy>` 动态分发，放入 **quant-app**
   - **产出：** quant-app/src/strategy/mod.rs | **学习点：** Strategy 设计模式、trait object
   - **技术方案：** 见 [tech/06_strategy_layer.md § 6.2](tech/06_strategy_layer.md)
 
 - [ ] **T6.2 均线交叉策略** — 金叉 Buy / 死叉 Sell，参数可配(短/长周期)
-  - **产出：** quant-app/src/strategy/ma_cross.rs | **学习点：** 交叉检测算法、状态跟踪
+  - **产出：** quant-app/src/strategy/sma_cross.rs | **学习点：** 交叉检测算法、状态跟踪
   - **技术方案：** 见 [tech/06_strategy_layer.md § 6.3](tech/06_strategy_layer.md)
 
 - [ ] **T6.3 RSI 超买超卖策略** — RSI<30 Buy / RSI>70 Sell，参数可配
-  - **产出：** quant-app/src/strategy/rsi_reversal.rs | **学习点：** 阈值策略、参数化设计
+  - **产出：** quant-app/src/strategy/rsi_strategy.rs | **学习点：** 阈值策略、参数化设计
   - **技术方案：** 见 [tech/06_strategy_layer.md § 6.4](tech/06_strategy_layer.md)
 
 - [ ] **T6.4 模拟交易** — Paper Trading：持仓跟踪 + 账户余额 + 盈亏计算 + 手动下单/平仓，放入 **quant-app**
@@ -203,11 +203,11 @@
 | T1.1 | ⬜ | cargo workspace、多 crate 依赖 | quant-data(lib) + quant-app(bin) 骨架 |
 | T1.2 | ⬜ | serde derive、thiserror | 数据模型 + 错误类型（quant-data） |
 | T1.3 | ⬜ | reqwest、async_trait | REST 客户端（quant-data） |
-| T1.4 | ⬜ | 文件 I/O、缓存策略 | JSON 持久化（quant-data） |
+| T1.4 | ⬜ | 文件 I/O、缓存策略 | Parquet 持久化（quant-data） |
 | T1.5 | ⬜ | async 测试、mock 注入 | 数据层测试（quant-data） |
 | T2.1 | ⬜ | Trait 抽象、动态分发 | Indicator trait（quant-data） |
 | T2.2 | ⬜ | 迭代器链、f64 精度 | SMA + EMA（quant-data） |
-| T2.3 | ⬜ | 数值算法、HashMap | RSI + MACD（quant-data） |
+| T2.3 | ⬜ | 数值算法、Multi 输出 | RSI + MACD（quant-data） |
 | T2.4 | ⬜ | 标准差、浮点精度 | 布林带（quant-data） |
 | T2.5 | ⬜ | 管道模式、近似断言 | 指标管道 + 测试（quant-data） |
 | T3.1 | ⬜ | eframe、即时模式 GUI | 应用入口 + 布局（quant-app） |

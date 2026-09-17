@@ -58,14 +58,14 @@ Rust 初学者（项目所有者），前端背景，已完成 myapp + rustkv，
 **Phase 1 — 数据层**
 
 - `quant-data` crate：封装 Binance REST API 客户端，支持多交易对（BTCUSDT/ETHUSDT 等）和多周期（1m/5m/15m/1h/4h/1d）
-- 本地缓存模块：JSON 文件存储，按 `{symbol}/{interval}.json` 组织，重复请求直接读缓存
+- 本地缓存模块：Parquet 文件存储，按 `{symbol}/{interval}.parquet` 组织，重复请求直接读缓存
 - CLI 工具：`cargo run -- fetch --symbol BTCUSDT --interval 1h --limit 500`，终端打印 K 线表格
 - 单元测试：mock HTTP 响应，验证数据解析和缓存命中逻辑
 
 **Phase 2 — 指标层**
 
 - 指标库 crate：输入 K 线序列输出各指标时间序列
-- Indicator trait 抽象：`fn calculate(klines: &[Kline]) -> Vec<IndicatorOutput>`
+- Indicator trait 抽象：`fn compute(&self, input: &[f64]) -> Result<IndicatorOutput, IndicatorError>`
 - 单元测试：与 TradingView 数据交叉验证，误差 < 0.01%
 
 **Phase 3 — 界面层**
@@ -89,7 +89,7 @@ Rust 初学者（项目所有者），前端背景，已完成 myapp + rustkv，
 
 **Phase 6 — 策略层**
 
-- Strategy trait 框架：`fn on_kline(&mut self, kline: &Kline, indicators: &IndicatorStore) -> Signal`
+- Strategy trait 框架：`fn on_kline(&mut self, kline: &Kline, indicators: &IndicatorValues, position: Option<&Position>) -> Signal`
 - 内置策略：均线交叉（金叉/死叉）+ RSI 超买超卖
 - 模拟交易（Paper Trading）：持仓跟踪 + 账户余额 + 盈亏计算
 - CSV 导出：K 线数据 / 回测结果 / 交易记录一键导出
@@ -97,23 +97,32 @@ Rust 初学者（项目所有者），前端背景，已完成 myapp + rustkv，
 ## 4. 数据模型
 
 ```rust
-// K 线 (OHLCV)
+// K 线 (OHLCV) — 10 字段完整定义
 Kline {
-    open_time, close_time: u64,    // 开盘/收盘时间 (Unix ms)
-    interval: Interval,            // M1/M5/M15/H1/H4/D1
-    open, high, low, close: f64,   // OHLC 价格
-    volume, quote_volume: f64,     // 成交量 / 成交额
-    symbol: String,
+    open_time: i64,                  // 开盘时间 (Unix ms)
+    open: f64,                       // 开盘价
+    high: f64,                       // 最高价
+    low: f64,                        // 最低价
+    close: f64,                      // 收盘价
+    volume: f64,                     // 成交量（基础资产数量）
+    close_time: i64,                 // 收盘时间 (Unix ms)
+    quote_volume: f64,               // 成交额（报价资产数量，如 USDT）
+    trades_count: u32,               // 成交笔数
+    is_closed: bool,                 // K 线是否已收盘
 }
+
+// K 线周期枚举（8 个值）
+enum Interval { M1, M5, M15, M30, H1, H4, D1, W1 }
 
 // 实时 Ticker（WebSocket 推送）
 Ticker {
     symbol: String,
-    price: f64,                    // 最新价
-    price_change_pct: f64,         // 24h 涨跌幅
-    volume_24h: f64,               // 24h 成交量
-    high_24h, low_24h: f64,        // 24h 最高/最低
-    update_time: u64,              // 更新时间 (Unix ms)
+    price: f64,                      // 最新价
+    volume: f64,                     // 24h 成交量
+    price_change_pct: f64,           // 24h 涨跌幅
+    high_24h: f64,                   // 24h 最高价
+    low_24h: f64,                    // 24h 最低价
+    timestamp: i64,                  // 更新时间 (Unix ms)
 }
 
 // WebSocket K 线推送
@@ -123,16 +132,22 @@ WsKline {
     open, high, low, close: f64,
     volume: f64,
     is_closed: bool,               // K 线是否已闭合
-    close_time: u64,
+    close_time: i64,
 }
 
 // 指标体系
 enum IndicatorName { SMA, EMA, RSI, MACD, BollingerBands }
-Indicator { name: IndicatorName, params: Vec<(&str, f64)> }
-// SMA→[("period",20)]  MACD→[("fast",12),("slow",26),("signal",9)]
+
+/// 指标计算 trait
+trait Indicator {
+    fn name(&self) -> &str;
+    fn compute(&self, input: &[f64]) -> Result<IndicatorOutput, IndicatorError>;
+}
+
+/// 指标输出（支持单值和多值指标）
 enum IndicatorOutput {
-    Single(f64),                   // SMA/EMA/RSI → 单值
-    Multi(HashMap<String, f64>),   // MACD→dif/dea/hist, BB→upper/middle/lower
+    Single(Vec<f64>),                         // SMA/EMA/RSI → 单值序列
+    Multi { names: Vec<String>, values: Vec<Vec<f64>> },  // MACD/BB → 多值序列
 }
 
 // 回测
@@ -141,7 +156,7 @@ BacktestResult {
     total_return, annualized_return, benchmark_return,  // 收益
     sharpe_ratio, max_drawdown, volatility,              // 风险
     win_rate, profit_loss_ratio,                         // 交易统计
-    trades: Vec<TradeRecord>, equity_curve: Vec<(u64, f64)>,
+    trades: Vec<TradeRecord>, equity_curve: Vec<(i64, f64)>,
 }
 TradeRecord { side: Signal, entry_price, exit_price, quantity, pnl, commission, open_time, close_time }
 
@@ -149,7 +164,10 @@ TradeRecord { side: Signal, entry_price, exit_price, quantity, pnl, commission, 
 enum Signal { Buy, Sell, Hold }
 trait Strategy {
     fn name(&self) -> &str;
-    fn on_kline(&mut self, kline: &Kline, indicators: &IndicatorStore) -> Signal;
+    fn default_params() -> Vec<(&'static str, f64)>;
+    fn init(&mut self, data: &[Kline]) -> Result<()>;
+    fn on_kline(&mut self, kline: &Kline, indicators: &IndicatorValues, position: Option<&Position>) -> Signal;
+    fn reset(&mut self);
 }
 ```
 

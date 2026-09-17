@@ -39,18 +39,49 @@ Phase 1 (data)          Phase 2 (indicators)       Phase 3 (ui)
 
 ## 3.2 应用入口与 eframe 配置
 
+### quant-app/Cargo.toml 依赖配置（Phase 3 涉及的 crate）
+
+```toml
+# quant-app/Cargo.toml
+
+[package]
+name = "quant-app"
+version = "0.1.0"
+edition = "2021"
+description = "RustQuant 桌面应用：egui GUI、回测引擎、策略框架"
+
+[[bin]]
+name = "quant-app"
+path = "src/main.rs"
+
+[dependencies]
+# 项目内部 crate
+quant-data = { path = "../quant-data" }
+
+# 继承 workspace 依赖
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+eframe = { workspace = true }
+egui_plot = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+```
+
 ### main.rs 启动配置
 
 ```rust
 // src/main.rs
 use eframe::NativeOptions;
-use rustquant::ui::QuantApp;
+use crate::ui::app::QuantApp;
 
 #[tokio::main]
 async fn main() -> eframe::Result {
     // 初始化 tracing 日志
     tracing_subscriber::fmt()
-        .with_env_filter("rustquant=info")
+        .with_env_filter("quant_app=info")
         .init();
 
     // eframe 窗口配置
@@ -749,7 +780,6 @@ pub struct AppState {
     pub last_update_time: Option<i64>,
 
     // === egui 输入（用于获取滚轮等事件）===
-    #[serde(skip)]
     raw_input: egui::RawInput,
 
     // === 数据层引用（Phase 4 添加 channel receiver）===

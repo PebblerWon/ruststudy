@@ -64,56 +64,49 @@
 
 ```
 quant/
-├── docs/
-│   ├── PRD.md                    # 产品需求文档
-│   ├── DEV_PLAN.md               # 开发计划
-│   ├── TECH_SELECTION.md         # 技术选型方案
-│   └── ARCHITECTURE.md           # 架构设计（本文件）
-├── src/
-│   ├── common/
-│   │   ├── mod.rs                # 公共模块入口
-│   │   ├── error.rs              # 统一错误类型 (QuantError)
-│   │   ├── config.rs             # 全局配置（API 地址、刷新间隔等）
-│   │   └── models.rs             # 核心数据模型 (Kline, Ticker, Trade)
-│   ├── data/
-│   │   ├── mod.rs                # 数据层入口
-│   │   ├── fetcher.rs            # Binance REST API 数据获取
-│   │   ├── kline_store.rs        # K 线数据缓存与管理
-│   │   └── types.rs              # Binance API 响应类型定义
-│   ├── indicators/
-│   │   ├── mod.rs                # 指标层入口、Indicator trait 定义
-│   │   ├── sma.rs                # 简单移动平均线
-│   │   ├── ema.rs                # 指数移动平均线
-│   │   ├── rsi.rs                # 相对强弱指标
-│   │   ├── macd.rs               # MACD 指标
-│   │   └── bollinger.rs          # 布林带
-│   ├── ui/
-│   │   ├── mod.rs                # UI 层入口
-│   │   ├── app.rs                # 主应用状态与布局
-│   │   ├── chart.rs              # K 线图 (Candlestick via Shape API)
-│   │   ├── indicator_panel.rs    # 指标叠加面板
-│   │   ├── control_panel.rs      # 交易对/时间框架选择控件
-│   │   └── theme.rs              # 颜色主题与样式配置
-│   ├── realtime/
-│   │   ├── mod.rs                # 实时层入口
-│   │   ├── ws_client.rs          # WebSocket 客户端（连接管理、重连）
-│   │   └── handler.rs            # 消息解析与分发
-│   ├── backtest/
-│   │   ├── mod.rs                # 回测层入口
-│   │   ├── engine.rs             # 向量化回测引擎
-│   │   ├── report.rs             # 绩效报告（收益/回撤/夏普比率）
-│   │   └── data_loader.rs        # 历史数据加载（从 KlineStore）
-│   ├── strategy/
-│   │   ├── mod.rs                # 策略层入口、Strategy trait 定义
-│   │   ├── ma_cross.rs           # 均线交叉策略
-│   │   └── rsi_reversal.rs       # RSI 超买超卖策略
-│   ├── main.rs                   # 程序入口、启动 eframe
-│   └── lib.rs                    # 库入口、模块声明
-├── Cargo.toml
-└── tests/
-    ├── data_tests.rs             # 数据层集成测试
-    ├── indicator_tests.rs        # 指标计算单元测试
-    └── backtest_tests.rs         # 回测引擎测试
+├── Cargo.toml              (workspace)
+├── quant-data/
+│   ├── Cargo.toml
+│   └── src/
+│       ├── lib.rs
+│       ├── common/
+│       │   ├── mod.rs
+│       │   ├── models.rs        # Kline, Ticker, Interval, IndicatorValues 等核心模型
+│       │   └── error.rs         # QuantError 统一错误类型
+│       ├── data/
+│       │   ├── mod.rs
+│       │   ├── fetcher.rs       # BinanceClient — REST API 数据获取
+│       │   └── store.rs         # KlineStore — 本地 Parquet 缓存
+│       ├── indicators/
+│       │   ├── mod.rs           # Indicator trait 定义
+│       │   ├── sma.rs
+│       │   ├── ema.rs
+│       │   ├── rsi.rs
+│       │   ├── macd.rs
+│       │   └── bollinger.rs
+│       └── realtime/
+│           ├── mod.rs
+│           ├── ws_client.rs     # WebSocket 客户端
+│           └── service.rs       # 实时行情服务
+└── quant-app/
+    ├── Cargo.toml
+    └── src/
+        ├── main.rs
+        ├── ui/
+        │   ├── mod.rs
+        │   ├── app.rs           # QuantApp 主状态与布局
+        │   ├── watchlist.rs     # 品种列表
+        │   ├── chart.rs         # K 线图
+        │   ├── indicator_panel.rs # 指标叠加面板
+        │   └── toolbar.rs       # 工具栏
+        ├── backtest/
+        │   ├── mod.rs
+        │   ├── engine.rs        # 向量化回测引擎
+        │   └── report.rs        # 绩效报告
+        └── strategy/
+            ├── mod.rs           # Strategy trait 定义
+            ├── sma_cross.rs     # 均线交叉策略
+            └── rsi_strategy.rs  # RSI 超买超卖策略
 ```
 
 ### 文件职责表
@@ -123,8 +116,8 @@ quant/
 | `common/error.rs` | `QuantError` 枚举，统一错误类型 | common | Phase 1 |
 | `common/config.rs` | API 地址、刷新间隔、默认交易对 | common | Phase 1 |
 | `common/models.rs` | `Kline`, `Ticker`, `Interval` 等核心模型 | common | Phase 1 |
-| `data/fetcher.rs` | `DataFetcher` — 调用 Binance REST 获取 K 线 | data | Phase 1 |
-| `data/kline_store.rs` | `KlineStore` — 内存 K 线缓存、polars DataFrame | data | Phase 1 |
+| `data/fetcher.rs` | `BinanceClient` — 调用 Binance REST 获取 K 线 | data | Phase 1 |
+| `data/store.rs` | `KlineStore` — Parquet 本地缓存、polars DataFrame | data | Phase 1 |
 | `data/types.rs` | Binance API JSON 响应的 serde 反序列化类型 | data | Phase 1 |
 | `indicators/mod.rs` | `Indicator` trait 定义、指标注册 | indicators | Phase 2 |
 | `indicators/sma.rs` ~ `bollinger.rs` | 各指标实现 | indicators | Phase 2 |
@@ -133,13 +126,13 @@ quant/
 | `ui/indicator_panel.rs` | 指标曲线叠加 (egui_plot) | ui | Phase 3 |
 | `ui/control_panel.rs` | 交易对选择、时间框架、指标开关 | ui | Phase 3 |
 | `realtime/ws_client.rs` | WebSocket 连接、自动重连、消息流 | realtime | Phase 4 |
-| `realtime/handler.rs` | 解析 Binance WS 消息、转换为 Ticker | realtime | Phase 4 |
+| `realtime/service.rs` | 解析 Binance WS 消息、转换为 Ticker | realtime | Phase 4 |
 | `backtest/engine.rs` | 向量化回测核心逻辑 | backtest | Phase 5 |
 | `backtest/report.rs` | 回测绩效统计与报告输出 | backtest | Phase 5 |
 | `backtest/data_loader.rs` | 从 KlineStore 加载历史数据到 polars | backtest | Phase 5 |
 | `strategy/mod.rs` | `Strategy` trait 定义 | strategy | Phase 6 |
-| `strategy/ma_cross.rs` | 均线交叉策略实现 | strategy | Phase 6 |
-| `strategy/rsi_reversal.rs` | RSI 超买超卖策略实现 | strategy | Phase 6 |
+| `strategy/sma_cross.rs` | 均线交叉策略实现 | strategy | Phase 6 |
+| `strategy/rsi_strategy.rs` | RSI 超买超卖策略实现 | strategy | Phase 6 |
 
 ---
 
@@ -152,12 +145,12 @@ Binance REST API
       │
       ▼
 ┌──────────────┐
-│  DataFetcher │  reqwest GET /api/v3/klines
+│  BinanceClient│  reqwest GET /api/v3/klines
 └──────┬───────┘
        │ Vec<Kline>
        ▼
 ┌──────────────┐
-│  KlineStore  │  内存缓存 + polars DataFrame
+│  KlineStore  │  Parquet 缓存 + polars DataFrame
 └──────┬───────┘
        │ DataFrame
        ▼
@@ -285,22 +278,35 @@ backtest ──→ data ──→ common
 ### 6.2 关键 trait 定义
 
 ```rust
-// indicators/mod.rs — 指标抽象
+// indicators/mod.rs — 指标抽象（详见 tech/02_indicator_layer.md）
+
+/// 指标计算结果
+pub enum IndicatorOutput {
+    Single(Vec<f64>),
+    Multi { names: Vec<String>, values: Vec<Vec<f64>> },
+}
+
 pub trait Indicator {
     /// 指标名称
     fn name(&self) -> &str;
-    /// 计算指标值（输入收盘价序列，输出指标值序列）
-    fn compute(&self, closes: &[f64]) -> Vec<f64>;
+    /// 计算指标值（输入收盘价序列，输出指标结果）
+    fn compute(&self, input: &[f64]) -> Result<IndicatorOutput, IndicatorError>;
 }
 
-// strategy/mod.rs — 策略抽象
+// strategy/mod.rs — 策略抽象（详见 tech/06_strategy_layer.md）
 pub enum Signal { Buy, Sell, Hold }
 
 pub trait Strategy {
     /// 策略名称
     fn name(&self) -> &str;
-    /// 根据当前指标值生成交易信号
-    fn generate_signal(&self, indicators: &IndicatorValues) -> Signal;
+    /// 策略默认参数（用于 UI 参数面板）
+    fn default_params() -> Vec<(&'static str, f64)>;
+    /// 初始化策略（回测开始前调用一次）
+    fn init(&mut self, data: &[Kline]) -> anyhow::Result<()>;
+    /// 根据当前 K 线和指标值生成交易信号
+    fn on_kline(&mut self, kline: &Kline, indicators: &IndicatorValues, position: Option<&Position>) -> Signal;
+    /// 重置策略状态（新一轮回测前调用）
+    fn reset(&mut self);
 }
 
 // data/mod.rs — 数据源抽象（便于 mock 测试）
@@ -333,31 +339,38 @@ pub trait DataProvider: Send + Sync {
 ### 7.1 核心数据结构
 
 ```rust
-/// K 线数据（common/models.rs）
+/// K 线数据（quant-data/src/common/models.rs）
+/// 对应 Binance GET /api/v3/klines 返回的单根 K 线
 pub struct Kline {
-    pub open_time: i64,      // 开盘时间 (ms timestamp)
-    pub open: f64,
-    pub high: f64,
-    pub low: f64,
-    pub close: f64,
-    pub volume: f64,
-    pub close_time: i64,     // 收盘时间
+    pub open_time: i64,      // 开盘时间 (Unix ms)
+    pub open: f64,           // 开盘价
+    pub high: f64,           // 最高价
+    pub low: f64,            // 最低价
+    pub close: f64,          // 收盘价
+    pub volume: f64,         // 成交量（基础资产数量）
+    pub close_time: i64,     // 收盘时间 (Unix ms)
+    pub quote_volume: f64,   // 成交额（报价资产数量）
+    pub trades_count: u32,   // 成交笔数
+    pub is_closed: bool,     // K 线是否已收盘
 }
 
-/// 实时行情（common/models.rs）
+/// 实时行情（quant-data/src/common/models.rs）
 pub struct Ticker {
     pub symbol: String,
-    pub price: f64,
-    pub volume: f64,
-    pub timestamp: i64,
+    pub price: f64,            // 最新价
+    pub volume: f64,           // 24h 成交量
+    pub price_change_pct: f64, // 24h 涨跌幅
+    pub high_24h: f64,         // 24h 最高价
+    pub low_24h: f64,          // 24h 最低价
+    pub timestamp: i64,        // 更新时间 (Unix ms)
 }
 
-/// 时间间隔枚举
+/// K 线周期枚举（8 个值，与 Binance API interval 参数一一对应）
 pub enum Interval {
-    M1, M5, M15, M30, H1, H4, D1,
+    M1, M5, M15, M30, H1, H4, D1, W1,
 }
 
-/// 指标值集合（传递给策略层）
+/// 指标值集合（传递给策略层，定义于 quant-data/src/common/models.rs）
 pub struct IndicatorValues {
     pub closes: Vec<f64>,
     pub sma: Option<Vec<f64>>,
@@ -384,8 +397,8 @@ Ticker ──┘ (实时更新)
 
 | 阶段 | 新增模块 | 新增依赖 | 累计模块数 |
 |------|---------|---------|-----------|
-| **Phase 1** | common, data | tokio, reqwest, serde, chrono, polars, anyhow, tracing | 2 |
-| **Phase 2** | indicators | thiserror | 3 |
+| **Phase 1** | common, data | tokio, reqwest, serde, chrono, polars, anyhow, thiserror, tracing | 2 |
+| **Phase 2** | indicators | — (复用 thiserror) | 3 |
 | **Phase 3** | ui | eframe, egui_plot | 4 |
 | **Phase 4** | realtime | tokio-tungstenite, futures-util | 5 |
 | **Phase 5** | backtest | — (复用 polars) | 6 |

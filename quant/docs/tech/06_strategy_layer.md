@@ -2,6 +2,15 @@
 
 ## 6.1 模块概述
 
+### quant-app/Cargo.toml 补充依赖（Phase 6）
+
+```toml
+# quant-app/Cargo.toml 追加
+
+[dependencies]
+csv = "1"                  # CSV 导出（回测报告、K 线数据导出）
+```
+
 ### 本阶段目标
 
 实现策略框架和内置策略，整合回测引擎，完成 UI 报告界面和系统整体集成。
@@ -35,11 +44,12 @@
 ```rust
 // strategy/mod.rs
 
-use crate::common::models::{Kline, IndicatorValues, Signal};
+use quant_data::common::models::{Kline, IndicatorValues};
 
 /// 交易策略抽象
 /// 所有策略必须实现此 trait
-pub trait Strategy {
+/// Send + Sync 约束确保策略可在多线程环境安全使用
+pub trait Strategy: Send + Sync {
     /// 策略名称（用于 UI 展示和日志）
     fn name(&self) -> &str;
 
@@ -48,8 +58,8 @@ pub trait Strategy {
 
     /// 初始化策略（回测开始前调用一次）
     /// 用于预计算指标索引等准备工作
-    fn init(&mut self, data: &[Kline], indicators: &IndicatorValues) -> anyhow::Result<()> {
-        let _ = (data, indicators);
+    fn init(&mut self, data: &[Kline]) -> anyhow::Result<()> {
+        let _ = data;
         Ok(())
     }
 
@@ -133,7 +143,8 @@ impl StrategyRegistry {
 ```rust
 // strategy/ma_cross.rs
 
-use crate::common::models::{Kline, IndicatorValues, Signal};
+use quant_data::common::models::{Kline, IndicatorValues};
+use crate::strategy::Signal;
 use super::Strategy;
 
 /// SMA 均线交叉策略
@@ -185,10 +196,11 @@ impl Strategy for SmaCrossStrategy {
         };
 
         // 取最新的两个 SMA 值（快线和慢线）
+        // TODO: 实际实现中，fast_val 和 slow_val 应分别来自不同周期的 SMA 计算结果
+        // 当前代码从同一个 SMA 数组取同一个索引的值，这是一个 bug，
+        // 正确做法是分别用 fast_period 和 slow_period 计算两个 SMA，然后取各自最新值
         let fast_val = sma.get(sma.len() - 1).copied().unwrap_or(0.0);
         let slow_val = sma.get(sma.len() - 1).copied().unwrap_or(0.0);
-
-        // 实际实现中，fast_val 和 slow_val 分别来自不同周期的 SMA
         let is_above = fast_val > slow_val;
 
         if is_above && !self.was_above {
@@ -237,7 +249,8 @@ impl Strategy for SmaCrossStrategy {
 ```rust
 // strategy/rsi_reversal.rs
 
-use crate::common::models::{Kline, IndicatorValues, Signal};
+use quant_data::common::models::{Kline, IndicatorValues};
+use crate::strategy::Signal;
 use super::Strategy;
 
 /// RSI 超买超卖策略
@@ -337,7 +350,7 @@ impl Strategy for RsiStrategy {
 
 use crate::backtest::engine::BacktestEngine;
 use crate::backtest::report::{BacktestConfig, BacktestResult};
-use crate::common::models::{Kline, IndicatorValues};
+use quant_data::common::models::{Kline, IndicatorValues};
 use super::Strategy;
 
 /// 模拟交易器（整合策略与回测引擎）
@@ -363,7 +376,7 @@ impl PaperTrader {
     pub fn run_backtest(
         &mut self,
         klines: &[Kline],
-        indicators: &[&dyn crate::indicators::Indicator],
+        indicators: &[&dyn quant_data::indicators::Indicator],
     ) -> anyhow::Result<&BacktestResult> {
         let result = self.engine.run(klines, self.strategy.as_mut(), indicators)?;
         self.last_result = Some(result);
@@ -547,7 +560,7 @@ impl BacktestPanel {
 
 use csv::Writer;
 use serde::Serialize;
-use crate::common::models::Kline;
+use quant_data::common::models::Kline;
 
 /// 导出 K 线数据为 CSV
 pub fn export_klines_csv(klines: &[Kline], path: &std::path::Path) -> anyhow::Result<()> {
@@ -598,8 +611,8 @@ main()
   ├── eframe::run_native(QuantApp)        // 启动 GUI
   │     │
   │     └── QuantApp::new()
-  │           ├── 创建 DataFetcher
-  │           ├── 创建 IndicatorStore
+  │           ├── 创建 BinanceClient
+  │           ├── 创建 IndicatorPipeline
   │           ├── 创建 PaperTrader
   │           ├── 创建 BacktestPanel
   │           └── 启动 WebSocket task (可选)
@@ -616,11 +629,14 @@ main()
 ```rust
 // main.rs
 
-mod common;
-mod data;
-mod indicators;
+// quant-data 模块通过外部 crate 引用
+use quant_data::common;
+use quant_data::data;
+use quant_data::indicators;
+use quant_data::realtime;
+
+// quant-app 内部模块
 mod ui;
-mod realtime;
 mod backtest;
 mod strategy;
 
@@ -630,7 +646,7 @@ use anyhow::Result;
 async fn main() -> eframe::Result {
     // 初始化日志
     tracing_subscriber::fmt()
-        .with_env_filter("rustquant=info")
+        .with_env_filter("quant_app=info")
         .init();
 
     tracing::info!("RustQuant 启动中...");
@@ -660,29 +676,33 @@ async fn main() -> eframe::Result {
 ```rust
 // ui/app.rs
 
+use quant_data::common::models::{Kline, Interval, Ticker};
+use quant_data::data::fetcher::BinanceClient;
+use quant_data::data::kline_store::KlineStore;
+
+/// QuantApp 使用 AppState 集中管理所有状态（与 tech/03 §3.8 一致）
 pub struct QuantApp {
-    // 数据层
-    data_fetcher: DataFetcher,
-    kline_store: KlineStore,
-    // 指标层
-    indicator_store: IndicatorStore,
+    /// 集中管理的 UI 状态
+    state: AppState,
+    // 子面板
+    watchlist: WatchlistPanel,
+    chart: CandlestickChart,
+    indicator_panel: IndicatorPanel,
     // 策略层
     paper_trader: PaperTrader,
     strategy_registry: StrategyRegistry,
     // UI 面板
     backtest_panel: BacktestPanel,
-    // 实时层
-    ws_tx: Option<mpsc::UnboundedSender<Ticker>>,
-    ws_rx: mpsc::UnboundedReceiver<Ticker>,
-    // 状态
-    current_symbol: String,
-    current_interval: Interval,
+    // 实时层通道
+    kline_rx: mpsc::UnboundedReceiver<WsKline>,
+    ticker_rx: mpsc::UnboundedReceiver<WsTicker>,
 }
 ```
 
 ### 设计要点
 
 - `main.rs` 保持极简，仅负责初始化和启动
+- `QuantApp` 使用 `state: AppState` 集中管理状态（与 tech/03 §3.8 一致），避免字段平铺
 - 各模块通过 `QuantApp` 的字段持有，在 `update()` 中协调
 - 策略注册表在 `QuantApp::new()` 中初始化，UI 面板从中获取策略列表
 - 中文支持通过 `load_chinese_fonts()` 加载字体文件
