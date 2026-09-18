@@ -294,9 +294,22 @@ impl BinanceClient {
         let response = self.client.get(&url).send().await
             .map_err(|e| QuantError::Network(e.to_string()))?;
 
-        // 解析并提取交易对列表
-        // ... 省略完整实现
-        todo!()
+        // 解析 JSON 响应
+        let raw: RawExchangeInfoResponse = response.json().await
+            .map_err(|e| QuantError::Parse(e.to_string()))?;
+
+        // 过滤出 status 为 "TRADING" 的交易对，并转换为 ExchangeInfo
+        Ok(raw
+            .symbols
+            .into_iter()
+            .filter(|s| s.status == "TRADING")
+            .map(|s| crate::common::models::ExchangeInfo {
+                symbol: s.symbol,
+                status: s.status,
+                base_asset_precision: s.base_asset_precision,
+                quote_asset_precision: s.quote_asset_precision,
+            })
+            .collect())
     }
 }
 ```
@@ -351,6 +364,23 @@ impl RawKlineResponse {
             })
         }).collect()
     }
+}
+
+/// Binance exchangeInfo API 原始响应
+#[derive(Debug, Deserialize)]
+pub struct RawExchangeInfoResponse {
+    pub symbols: Vec<RawSymbolInfo>,
+}
+
+/// 单个交易对的原始数据（Binance exchangeInfo 格式）
+#[derive(Debug, Deserialize)]
+pub struct RawSymbolInfo {
+    pub symbol: String,
+    pub status: String,
+    #[serde(rename = "baseAssetPrecision")]
+    pub base_asset_precision: u8,
+    #[serde(rename = "quoteAssetPrecision")]
+    pub quote_asset_precision: u8,
 }
 ```
 
@@ -420,15 +450,18 @@ impl KlineStore {
         let merged = if path.exists() {
             let existing = self.load_klines(symbol, interval)?;
             let existing_df = klines_to_dataframe(&existing)?;
-            // 纵向拼接后按 open_time 去重
-            polars::functions::concat(&[existing_df, df], Vertical)?
+            // 纵向拼接后按 open_time 去重（polars 0.46 使用 lazy concat）
+            concat(
+                &[existing_df.lazy(), df.lazy()],
+                UnionArgs::default(),
+            )?.collect()?
                 .unique(None, UniqueKeepStrategy::First, None)?
         } else {
             df
         };
 
         // 按 open_time 排序后写入 Parquet
-        let sorted = merged.sort(["open_time"], SortMultipleOptions::default())?;
+        let mut sorted = merged.sort(["open_time"], SortMultipleOptions::default())?;
 
         // 确保目录存在
         if let Some(parent) = path.parent() {
@@ -438,7 +471,7 @@ impl KlineStore {
 
         let file = std::fs::File::create(&path)
             .map_err(|e| QuantError::Io(e.to_string()))?;
-        ParquetWriter::new(file).finish(&sorted)?;
+        ParquetWriter::new(file).finish(&mut sorted)?;
 
         tracing::info!(
             symbol = symbol,
@@ -494,6 +527,9 @@ fn klines_to_dataframe(klines: &[Kline]) -> Result<DataFrame, QuantError> {
     let closes: Vec<f64> = klines.iter().map(|k| k.close).collect();
     let volumes: Vec<f64> = klines.iter().map(|k| k.volume).collect();
     let close_times: Vec<i64> = klines.iter().map(|k| k.close_time).collect();
+    let quote_volumes: Vec<f64> = klines.iter().map(|k| k.quote_volume).collect();
+    let trades_counts: Vec<u32> = klines.iter().map(|k| k.trades_count).collect();
+    let is_closed_list: Vec<bool> = klines.iter().map(|k| k.is_closed).collect();
 
     let df = df! {
         "open_time" => &open_times,
@@ -503,6 +539,9 @@ fn klines_to_dataframe(klines: &[Kline]) -> Result<DataFrame, QuantError> {
         "close" => &closes,
         "volume" => &volumes,
         "close_time" => &close_times,
+        "quote_volume" => &quote_volumes,
+        "trades_count" => &trades_counts,
+        "is_closed" => &is_closed_list,
     }?;
 
     Ok(df)
@@ -510,9 +549,75 @@ fn klines_to_dataframe(klines: &[Kline]) -> Result<DataFrame, QuantError> {
 
 /// 将 polars DataFrame 转回 Kline Vec
 fn dataframe_to_klines(df: &DataFrame) -> Result<Vec<Kline>, QuantError> {
-    // 从 DataFrame 各列提取数据，逐行构建 Kline
-    // ... 省略完整实现
-    todo!()
+    let open_times = df.column("open_time")
+        .map_err(|_| QuantError::Parse("缺少 open_time 列".into()))?
+        .i64()
+        .map_err(|_| QuantError::Parse("open_time 列类型不匹配".into()))?;
+    let opens = df.column("open")
+        .map_err(|_| QuantError::Parse("缺少 open 列".into()))?
+        .f64()
+        .map_err(|_| QuantError::Parse("open 列类型不匹配".into()))?;
+    let highs = df.column("high")
+        .map_err(|_| QuantError::Parse("缺少 high 列".into()))?
+        .f64()
+        .map_err(|_| QuantError::Parse("high 列类型不匹配".into()))?;
+    let lows = df.column("low")
+        .map_err(|_| QuantError::Parse("缺少 low 列".into()))?
+        .f64()
+        .map_err(|_| QuantError::Parse("low 列类型不匹配".into()))?;
+    let closes = df.column("close")
+        .map_err(|_| QuantError::Parse("缺少 close 列".into()))?
+        .f64()
+        .map_err(|_| QuantError::Parse("close 列类型不匹配".into()))?;
+    let volumes = df.column("volume")
+        .map_err(|_| QuantError::Parse("缺少 volume 列".into()))?
+        .f64()
+        .map_err(|_| QuantError::Parse("volume 列类型不匹配".into()))?;
+    let close_times = df.column("close_time")
+        .map_err(|_| QuantError::Parse("缺少 close_time 列".into()))?
+        .i64()
+        .map_err(|_| QuantError::Parse("close_time 列类型不匹配".into()))?;
+    let quote_volumes = df.column("quote_volume")
+        .map_err(|_| QuantError::Parse("缺少 quote_volume 列".into()))?
+        .f64()
+        .map_err(|_| QuantError::Parse("quote_volume 列类型不匹配".into()))?;
+    let trades_counts = df.column("trades_count")
+        .map_err(|_| QuantError::Parse("缺少 trades_count 列".into()))?
+        .u32()
+        .map_err(|_| QuantError::Parse("trades_count 列类型不匹配".into()))?;
+    let is_closed_list = df.column("is_closed")
+        .map_err(|_| QuantError::Parse("缺少 is_closed 列".into()))?
+        .bool()
+        .map_err(|_| QuantError::Parse("is_closed 列类型不匹配".into()))?;
+
+    let len = df.height();
+    let mut klines = Vec::with_capacity(len);
+    for i in 0..len {
+        klines.push(Kline {
+            open_time: open_times.get(i)
+                .ok_or_else(|| QuantError::Parse(format!("open_time 第 {} 行为空", i)))?,
+            open: opens.get(i)
+                .ok_or_else(|| QuantError::Parse(format!("open 第 {} 行为空", i)))?,
+            high: highs.get(i)
+                .ok_or_else(|| QuantError::Parse(format!("high 第 {} 行为空", i)))?,
+            low: lows.get(i)
+                .ok_or_else(|| QuantError::Parse(format!("low 第 {} 行为空", i)))?,
+            close: closes.get(i)
+                .ok_or_else(|| QuantError::Parse(format!("close 第 {} 行为空", i)))?,
+            volume: volumes.get(i)
+                .ok_or_else(|| QuantError::Parse(format!("volume 第 {} 行为空", i)))?,
+            close_time: close_times.get(i)
+                .ok_or_else(|| QuantError::Parse(format!("close_time 第 {} 行为空", i)))?,
+            quote_volume: quote_volumes.get(i)
+                .ok_or_else(|| QuantError::Parse(format!("quote_volume 第 {} 行为空", i)))?,
+            trades_count: trades_counts.get(i)
+                .ok_or_else(|| QuantError::Parse(format!("trades_count 第 {} 行为空", i)))?,
+            is_closed: is_closed_list.get(i)
+                .ok_or_else(|| QuantError::Parse(format!("is_closed 第 {} 行为空", i)))?,
+        });
+    }
+
+    Ok(klines)
 }
 ```
 

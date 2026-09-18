@@ -661,12 +661,12 @@ impl DataLoader {
         let volumes: Vec<f64> = klines.iter().map(|k| k.volume).collect();
 
         DataFrame::new(vec![
-            Series::new("open_time", open_times),
-            Series::new("open", opens),
-            Series::new("high", highs),
-            Series::new("low", lows),
-            Series::new("close", closes),
-            Series::new("volume", volumes),
+            Column::new("open_time".into(), open_times),
+            Column::new("open".into(), opens),
+            Column::new("high".into(), highs),
+            Column::new("low".into(), lows),
+            Column::new("close".into(), closes),
+            Column::new("volume".into(), volumes),
         ]).expect("DataFrame 创建失败")
     }
 }

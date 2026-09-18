@@ -674,11 +674,11 @@ impl IndicatorPipeline {
 // for (name, result) in results {
 //     match result? {
 //         IndicatorOutput::Single(values) => {
-//             df.with_column(Series::new(&name, &values))?;
+//             df.with_column(Column::new(name.into(), &values))?;
 //         }
 //         IndicatorOutput::Multi { names, values } => {
 //             for (col_name, col_values) in names.iter().zip(values.iter()) {
-//                 df.with_column(Series::new(col_name, col_values))?;
+//                 df.with_column(Column::new(col_name.clone(), col_values))?;
 //             }
 //         }
 //     }
