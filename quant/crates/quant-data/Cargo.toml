@@ -1,0 +1,24 @@
+[package]
+name = "quant-data"
+version = "0.1.0"
+edition = "2024"
+description = "RustQuant 数据层：数据获取、指标计算、实时行情（无 GUI 依赖）"
+
+[lib]
+name = "quant_data"
+path = "src/lib.rs"
+
+[dependencies]
+# 继承 workspace 依赖
+tokio = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+polars = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[dev-dependencies]
+tokio-test = { workspace = true }
