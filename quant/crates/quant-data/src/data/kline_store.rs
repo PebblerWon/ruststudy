@@ -41,14 +41,31 @@ impl KlineStore {
         let merged = if path.exists() {
             let existing = self.load_klines(symbol, interval)?;
             let existing_df = klines_to_dataframe(&existing)?;
-
             // 纵向拼接后按 open_time 去重（polars 0.46 使用 lazy concat）
             concat(&[existing_df.lazy(), df.lazy()], UnionArgs::default())?
+                .unique(
+                    Some(Vec::from(["open_time".to_string()])),
+                    UniqueKeepStrategy::First,
+                )
                 .collect()?
-                .unique(None, UniqueKeepStrategy::First, None)?
         } else {
             df
         };
+        let mut sorted = merged.sort(["open_time"], SortMultipleOptions::default())?;
+
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| QuantError::Io(e.to_string()))?;
+        }
+        let file = std::fs::File::create(&path).map_err(|e| QuantError::Io(e.to_string()))?;
+
+        ParquetWriter::new(file).finish(&mut sorted)?;
+
+        tracing::info!(
+            symbol = symbol,
+            interval = interval.as_str(),
+            count = sorted.height(),
+            "K 线数据已保存"
+        );
         Ok(())
     }
 
@@ -63,6 +80,21 @@ impl KlineStore {
 
         let a = dataframe_to_klines(&df)?;
         Ok(a)
+    }
+
+    pub fn get_data_range(
+        &self,
+        symbol: &str,
+        interval: Interval,
+    ) -> Result<Option<(i64, i64)>, QuantError> {
+        let klines = self.load_klines(symbol, interval)?;
+        if klines.is_empty() {
+            return Ok(None);
+        }
+        let min_time = klines.first().unwrap().open_time;
+        let max_time = klines.last().unwrap().open_time;
+
+        Ok(Some((min_time, max_time)))
     }
 }
 
@@ -153,25 +185,25 @@ fn dataframe_to_klines(df: &DataFrame) -> Result<Vec<Kline>, QuantError> {
         klines.push(Kline {
             open_time: open_times
                 .get(i)
-                .ok_or_else(|| QuantError::Parse((format!("open_time 第 {} 行为空", i))))?,
+                .ok_or_else(|| QuantError::Parse(format!("open_time 第 {} 行为空", i)))?,
             open: opens
                 .get(i)
-                .ok_or_else(|| QuantError::Parse((format!("open 第 {} 行为空", i))))?,
+                .ok_or_else(|| QuantError::Parse(format!("open 第 {} 行为空", i)))?,
             high: highs
                 .get(i)
-                .ok_or_else(|| QuantError::Parse((format!("high 第 {} 行为空", i))))?,
+                .ok_or_else(|| QuantError::Parse(format!("high 第 {} 行为空", i)))?,
             low: lows
                 .get(i)
-                .ok_or_else(|| QuantError::Parse((format!("low 第 {} 行为空", i))))?,
+                .ok_or_else(|| QuantError::Parse(format!("low 第 {} 行为空", i)))?,
             close: closes
                 .get(i)
-                .ok_or_else(|| QuantError::Parse((format!("close 第 {} 行为空", i))))?,
+                .ok_or_else(|| QuantError::Parse(format!("close 第 {} 行为空", i)))?,
             volume: volumes
                 .get(i)
-                .ok_or_else(|| QuantError::Parse((format!("volume 第 {} 行为空", i))))?,
+                .ok_or_else(|| QuantError::Parse(format!("volume 第 {} 行为空", i)))?,
             close_time: close_times
                 .get(i)
-                .ok_or_else(|| QuantError::Parse((format!("close_time 第 {} 行为空", i))))?,
+                .ok_or_else(|| QuantError::Parse(format!("close_time 第 {} 行为空", i)))?,
             quote_volume: quote_volumes
                 .get(i)
                 .ok_or_else(|| QuantError::Parse(format!("quote_volume 第 {} 行为空", i)))?,
@@ -180,7 +212,7 @@ fn dataframe_to_klines(df: &DataFrame) -> Result<Vec<Kline>, QuantError> {
                 .ok_or_else(|| QuantError::Parse(format!("trades_count 第 {} 行为空", i)))?,
             is_closed: is_closeds
                 .get(i)
-                .ok_or_else(|| QuantError::Parse((format!("is_closed 第 {} 行为空", i))))?,
+                .ok_or_else(|| QuantError::Parse(format!("is_closed 第 {} 行为空", i)))?,
         });
     }
     Ok(klines)
