@@ -1,12 +1,11 @@
 mod fetcher;
 mod kline_store;
 mod types;
+pub use fetcher::BinanceClient;
+pub use kline_store::KlineStore;
 
 use crate::common::error::QuantError;
 use crate::common::models::{Interval, Kline};
-use crate::data::fetcher::BinanceClient;
-use crate::data::kline_store::KlineStore;
-use std::sync::Arc;
 
 pub struct DataService {
     client: BinanceClient,
@@ -33,7 +32,7 @@ impl DataService {
         let range = self.store.get_data_range(symbol, interval)?;
         match range {
             Some((_min, max_time)) => {
-                let start_time = max_time + interval.as_millis();
+                let start_time = max_time;
 
                 let new_klines = self
                     .client

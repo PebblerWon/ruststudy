@@ -1,6 +1,5 @@
 use crate::common::error::QuantError;
 use crate::common::models::{Interval, Kline};
-use crate::data;
 use polars::prelude::*;
 use std::path::{Path, PathBuf};
 
@@ -45,7 +44,7 @@ impl KlineStore {
             concat(&[existing_df.lazy(), df.lazy()], UnionArgs::default())?
                 .unique(
                     Some(Vec::from(["open_time".to_string()])),
-                    UniqueKeepStrategy::First,
+                    UniqueKeepStrategy::Last,
                 )
                 .collect()?
         } else {

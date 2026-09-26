@@ -5,6 +5,9 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize)]
 pub struct RawKlineResponse(Vec<RawKlineRow>);
 
+// 字段 9-11 是 Binance 响应的占位字段（taker_buy_volume 等），
+// 按位置反序列化必须保留，故显式允许 dead_code
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct RawKlineRow(
     pub i64,    // 0: open_time
@@ -54,7 +57,7 @@ impl RawKlineResponse {
                         .parse()
                         .map_err(|_| QuantError::Parse("quote_volume".into()))?,
                     trades_count: row.8,
-                    is_closed: true,
+                    is_closed: row.6 <= chrono::Utc::now().timestamp_millis(),
                 })
             })
             .collect()

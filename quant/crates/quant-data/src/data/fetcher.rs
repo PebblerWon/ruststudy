@@ -1,5 +1,3 @@
-use std::format;
-
 use crate::common::error::QuantError;
 use crate::common::models::{ExchangeInfo, Interval, Kline};
 use crate::data::types::{RawExchangeInfoResponse, RawKlineResponse};
@@ -41,7 +39,7 @@ impl BinanceClient {
             .query(&[("limit", limit.to_string())]);
 
         if let Some(st) = start_time {
-            request = request.query(&["startTime", st.to_string().as_str()]);
+            request = request.query(&[("startTime", st.to_string().as_str())]);
         }
 
         let response = request
@@ -67,7 +65,6 @@ impl BinanceClient {
     }
 
     /// 获取交易对信息
-
     pub async fn fetch_exchange_info(&self) -> Result<Vec<ExchangeInfo>, QuantError> {
         let url = format!("{}/api/v3/exchangeInfo", self.base_url);
         let response = self
@@ -76,6 +73,16 @@ impl BinanceClient {
             .send()
             .await
             .map_err(|e| QuantError::Network(e.to_string()))?;
+
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            let body = response.text().await.unwrap_or_default();
+
+            return Err(QuantError::Api(format!(
+                "Binance API 错误：status={}, body={}",
+                status, body
+            )));
+        }
 
         let raw: RawExchangeInfoResponse = response
             .json()

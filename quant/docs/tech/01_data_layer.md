@@ -40,7 +40,7 @@ data/            ← 本阶段新增：API 客户端、数据缓存、数据服�
 [package]
 name = "quant-data"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "RustQuant 数据层：数据获取、指标计算、实时行情（无 GUI 依赖）"
 
 [lib]
@@ -206,7 +206,7 @@ pub struct ExchangeInfo {
 ### 设计要点
 
 - `Kline` 使用 `f64` 存储价格，Binance 返回字符串数字，在反序列化阶段完成转换
-- `Interval` 提供 `as_millis()` 方法，用于增量更新时计算下一根 K 线的起始时间
+- `Interval` 提供 `as_millis()` 方法，用于时间轴对齐与缓存新鲜度判断（如判断缓存最后一根 K 线是否已到收盘时间）
 - `is_closed` 字段区分已完成 K 线和当前进行中的 K 线
 
 ---
@@ -294,6 +294,15 @@ impl BinanceClient {
         let response = self.client.get(&url).send().await
             .map_err(|e| QuantError::Network(e.to_string()))?;
 
+        // 检查 HTTP 状态码
+        if !response.status().is_success() {
+            let status = response.status().as_u16();
+            let body = response.text().await.unwrap_or_default();
+            return Err(QuantError::Api(format!(
+                "Binance API 错误: status={}, body={}", status, body
+            )));
+        }
+
         // 解析 JSON 响应
         let raw: RawExchangeInfoResponse = response.json().await
             .map_err(|e| QuantError::Parse(e.to_string()))?;
@@ -360,7 +369,7 @@ impl RawKlineResponse {
                 close_time: row.6,
                 quote_volume: row.7.parse().map_err(|_| QuantError::Parse("quote_volume".into()))?,
                 trades_count: row.8,
-                is_closed: true, // 历史 K 线默认已收盘
+                is_closed: row.6 <= chrono::Utc::now().timestamp_millis(), // close_time 早于当前时间 → 已收盘
             })
         }).collect()
     }
@@ -391,6 +400,7 @@ pub struct RawSymbolInfo {
 - 价格字段以 `String` 接收再手动 `parse::<f64>()`，避免浮点精度丢失
 - `fetch_klines` 的 `start_time` 参数可选，用于增量更新时指定起始位置
 - 错误分为三类：`Network`（连接失败）、`Api`（HTTP 非 2xx）、`Parse`（JSON/字段解析失败）
+- `is_closed` 由 `close_time` 与当前时间比较得出，而非硬编码 `true`：Binance 返回的最后一根 K 线是进行中的，其 `close_time` 在未来
 
 ---
 
@@ -451,11 +461,14 @@ impl KlineStore {
             let existing = self.load_klines(symbol, interval)?;
             let existing_df = klines_to_dataframe(&existing)?;
             // 纵向拼接后按 open_time 去重（polars 0.46 使用 lazy concat）
-            concat(
-                &[existing_df.lazy(), df.lazy()],
-                UnionArgs::default(),
-            )?.collect()?
-                .unique(None, UniqueKeepStrategy::First, None)?
+            // 仅对 open_time 子集判重，且新数据优先（Last）：
+            // 重取的最后一根未收盘 K 线会覆盖缓存中的半成品数据
+            concat(&[existing_df.lazy(), df.lazy()], UnionArgs::default())?
+                .unique(
+                    Some(Vec::from(["open_time".to_string()])),
+                    UniqueKeepStrategy::Last,
+                )
+                .collect()?
         } else {
             df
         };
@@ -625,9 +638,10 @@ fn dataframe_to_klines(df: &DataFrame) -> Result<Vec<Kline>, QuantError> {
 
 ```
 1. 调用 get_data_range() 获取本地缓存的 (min_time, max_time)
-2. 计算下次请求的 start_time = max_time + interval.as_millis()
+2. 下次请求 start_time = max_time（不 + 一个周期：重取最后一根，
+   因为缓存中的最后一根可能尚未收盘，需要新数据覆盖修正）
 3. 调用 BinanceClient.fetch_klines(start_time = Some(start_time))
-4. 将新数据与已有数据合并（save_klines 内部处理去重）
+4. 将新数据与已有数据合并（save_klines 内部按 open_time 去重，新数据优先）
 5. 如果本地无缓存，直接获取最近 N 根 K 线
 ```
 
@@ -635,7 +649,7 @@ fn dataframe_to_klines(df: &DataFrame) -> Result<Vec<Kline>, QuantError> {
 
 - 使用 **Parquet** 格式而非 CSV/JSON：列式存储，读写效率高，文件体积小
 - 文件路径按 `{symbol}/{interval}.parquet` 组织，便于管理和查找
-- `save_klines` 自动处理合并去重（按 `open_time` 去重），调用方无需关心增量逻辑
+- `save_klines` 自动处理合并去重（仅对 `open_time` 子集判重，且新数据优先 Last），调用方无需关心增量逻辑
 - `get_data_range` 返回缓存的时间范围，供上层决定是否需要增量获取
 
 ---
@@ -647,11 +661,17 @@ fn dataframe_to_klines(df: &DataFrame) -> Result<Vec<Kline>, QuantError> {
 ```rust
 // src/data/mod.rs
 
-use std::sync::Arc;
+mod fetcher;
+mod kline_store;
+mod types;
+
+// 对外导出：否则外部 crate 无法命名 BinanceClient / KlineStore，
+// DataService::new() 对外不可用
+pub use fetcher::BinanceClient;
+pub use kline_store::KlineStore;
+
 use crate::common::models::{Kline, Interval};
 use crate::common::error::QuantError;
-use crate::data::fetcher::BinanceClient;
-use crate::data::kline_store::KlineStore;
 
 /// 数据服务层 — 整合 API 客户端和本地缓存
 /// 上层模块（UI、回测）通过 DataService 获取 K 线数据
@@ -683,8 +703,11 @@ impl DataService {
 
         match range {
             Some((_min, max_time)) => {
-                // 有缓存：增量获取最新数据
-                let start_time = max_time + interval.as_millis();
+                // 有缓存：从 max_time 起重新请求（包含最后一根）。
+                // 缓存的最后一根可能尚未收盘，若跳过（max_time + 周期），
+                // 其最终 OHLCV 将永远无法修正；
+                // 重复请求由 save_klines 去重（新数据优先）覆盖
+                let start_time = max_time;
                 let new_klines = self.client
                     .fetch_klines(symbol, interval, Some(start_time), limit)
                     .await?;
@@ -731,7 +754,7 @@ impl DataService {
 ### 设计要点
 
 - `DataService` 是上层模块访问数据的唯一入口，封装了缓存策略细节
-- 增量更新逻辑：有缓存时只请求 `max_time` 之后的新数据，减少 API 调用
+- 增量更新逻辑：有缓存时从 `max_time` 起重新请求（含最后一根未收盘 K 线），由去重覆盖修正半成品数据；`start_time` 在未来时 Binance 返回空数组，此时跳过保存
 - `get_klines_batch` 串行获取多交易对数据（Phase 1 不引入并发，保持简单）
 - 返回 `Vec<Kline>` 而非 DataFrame，DataFrame 转换在需要时（如回测层）进行
 
