@@ -60,3 +60,18 @@ impl RawKlineResponse {
             .collect()
     }
 }
+
+#[derive(Debug, Deserialize)]
+pub struct RawExchangeInfoResponse {
+    pub symbols: Vec<RawSymbolInfo>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RawSymbolInfo {
+    pub symbol: String,
+    pub status: String,
+    #[serde(rename = "baseAssetPrecision")]
+    pub base_asset_precision: u8,
+    #[serde(rename = "quoteAssetPrecision")]
+    pub quote_asset_precision: u8,
+}
