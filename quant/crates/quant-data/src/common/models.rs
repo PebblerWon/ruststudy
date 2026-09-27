@@ -94,3 +94,39 @@ pub struct ExchangeInfo {
     /// 报价资产精度（如 USDT 的价格小数位数）
     pub quote_asset_precision: u8,
 }
+
+#[derive(Debug, Clone)]
+pub struct IndicatorValues {
+    // 收盘价序列（基准数据）
+    pub closes: Vec<f64>,
+    /// SMA 结果（周期 → 值序列）
+    pub sma: Option<Vec<f64>>,
+    /// EMA 结果
+    pub ema: Option<Vec<f64>>,
+    /// RSI 结果
+    pub rsi: Option<Vec<f64>>,
+    /// MACD 结果（macd_line, signal_line, histogram）
+    pub macd: Option<Vec<Vec<f64>>>,
+    /// 布林带结果（upper, middle, lower）
+    pub bollinger: Option<Vec<Vec<f64>>>,
+}
+
+impl IndicatorValues {
+    pub fn new(closes: Vec<f64>) -> Self {
+        Self {
+            closes,
+            sma: None,
+            ema: None,
+            rsi: None,
+            macd: None,
+            bollinger: None,
+        }
+    }
+
+    pub fn latest_sma(&self) -> Option<f64> {
+        self.sma.as_ref()?.last().copied()
+    }
+    pub fn last_rsi(&self) -> Option<f64> {
+        self.rsi.as_ref()?.last().copied()
+    }
+}
