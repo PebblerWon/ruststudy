@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/quant-data"]
+members = ["crates/quant-app","crates/quant-data"]
 
 [workspace.dependencies]
 # 异步运行时

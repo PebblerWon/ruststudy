@@ -1,0 +1,22 @@
+[package]
+name = "quant-app"
+version = "0.1.0"
+edition = "2024"
+description = "RustQuant 桌面应用：egui GUI、回测引擎、策略框架"
+
+[dependencies]
+# 项目内部 crate
+quant-data = { path = "../quant-data" }
+egui-chinese-font = "0.2"
+egui="0.31.1"
+rand = "0.8.5"
+# 继承 workspace 依赖
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+eframe = { workspace = true }
+egui_plot = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
