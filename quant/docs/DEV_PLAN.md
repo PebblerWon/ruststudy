@@ -16,7 +16,7 @@
 | 里程碑 | 阶段 | 核心交付物 | 预估 |
 |--------|------|-----------|------|
 | M1 | Phase 1-2 | 数据获取 + 指标计算（quant-data，CLI 可验证） | ~3 周 |
-| M2 | Phase 3 | egui 桌面应用 + K 线图（quant-app） | ~2 周 |
+| M2 | Phase 3 | gpui 桌面应用 + K 线图（quant-app） | ~2 周 |
 | M3 | Phase 4 | WebSocket 实时行情 + UI 刷新（quant-data + quant-app 集成） | ~1.5 周 |
 | M4 | Phase 5-6 | 回测引擎 + 策略框架 + 完整系统（quant-app） | ~3 周 |
 
@@ -82,23 +82,23 @@
 
 ## Phase 3 — 界面层（~12 天）
 
-> 目标：构建 egui 桌面应用，K 线图 + 指标面板 + 品种切换（quant-app，依赖 quant-data）
-> 补强：egui 即时模式 GUI、布局、状态管理、自绘图元
+> 目标：构建 gpui 桌面应用，K 线图 + 指标面板 + 品种切换（quant-app，依赖 quant-data）
+> 补强：gpui 保留模式 GUI（Entity/Render/notify）、Taffy 布局、状态管理、组件化渲染
 
-- [ ] **T3.1 eframe 应用入口** — QuantApp 实现 eframe::App，主窗口四区布局，quant-app 依赖 quant-data
-  - **产出：** quant-app/src/ui/app.rs + theme.rs | **学习点：** eframe 生命周期、SidePanel/CentralPanel
+- [ ] **T3.1 gpui 应用入口** — application() 三段式启动，QuantApp 实现 Render trait，主窗口布局（Dock 多面板），quant-app 依赖 quant-data
+  - **产出：** quant-app/src/ui/app.rs + theme.rs | **学习点：** gpui 生命周期、v_flex/h_flex 布局、DockArea
   - **技术方案：** 见 [tech/03_ui_layer.md § 3.1](tech/03_ui_layer.md)
 
 - [ ] **T3.2 品种列表与控件** — 左侧交易对列表 + 顶部时间框架切换
-  - **产出：** quant-app/src/ui/control_panel.rs | **学习点：** egui 控件、状态绑定
+  - **产出：** quant-app/src/ui/control_panel.rs | **学习点：** gpui-kit 控件、状态绑定
   - **技术方案：** 见 [tech/03_ui_layer.md § 3.2](tech/03_ui_layer.md)
 
-- [ ] **T3.3 K 线图渲染** — Shape API 自绘 Candlestick（红绿蜡烛），缩放 + 平移
-  - **产出：** quant-app/src/ui/chart.rs | **学习点：** Shape API、坐标变换、自绘图元
+- [ ] **T3.3 K 线图渲染** — gpui-kit CandlestickChart 组件集成（红绿蜡烛 + 自动 OHLC tooltip），缩放 + 平移
+  - **产出：** quant-app/src/ui/chart.rs | **学习点：** CandlestickChart 链式 API、主题色板
   - **技术方案：** 见 [tech/03_ui_layer.md § 3.3](tech/03_ui_layer.md)
 
-- [ ] **T3.4 指标叠加与成交量** — K 线图叠加 SMA/EMA 曲线 + 成交量子图
-  - **产出：** quant-app/src/ui/indicator_panel.rs | **学习点：** 曲线绘制、多子图布局
+- [ ] **T3.4 指标叠加与成交量** — gpui-kit LineChart 叠加 SMA/EMA 曲线 + 成交量子图
+  - **产出：** quant-app/src/ui/indicator_panel.rs | **学习点：** LineChart 组件、多子图布局
   - **技术方案：** 见 [tech/03_ui_layer.md § 3.4](tech/03_ui_layer.md)
 
 - [ ] **T3.5 数据接入与状态管理** — 品种/周期切换触发 quant-data 加载、loading 态、app 状态流转
@@ -126,8 +126,8 @@
   - **产出：** quant-data channel 通信 + task 管理 | **学习点：** mpsc channel、CancellationToken
   - **技术方案：** 见 [tech/04_realtime_layer.md § 4.4-4.5](tech/04_realtime_layer.md)
 
-- [ ] **T4.4 UI 实时集成** — quant-app 通过 try_recv 消费 quant-data 推送、价格闪烁(涨绿跌红)、K 线自动追加、状态栏
-  - **产出：** quant-app 实时 UI | **学习点：** egui request_repaint、跨线程/跨 crate GUI 更新
+- [ ] **T4.4 UI 实时集成** — quant-app 通过 cx.spawn 前台任务消费 quant-data mpsc 推送 + cx.notify 刷新、价格闪烁(涨绿跌红)、K 线自动追加、状态栏
+  - **产出：** quant-app 实时 UI | **学习点：** gpui cx.spawn/cx.notify、Entity 状态更新、跨 crate GUI 集成
   - **技术方案：** 见 [tech/04_realtime_layer.md § 4.6](tech/04_realtime_layer.md)
 
 - [ ] **T4.5 断线重连** — 指数退避(1s→2s→4s→30s)、状态栏连接状态
@@ -156,7 +156,7 @@
   - **技术方案：** 见 [tech/05_backtest_layer.md § 5.3](tech/05_backtest_layer.md)
 
 - [ ] **T5.4 回测报告 UI** — 收益曲线图 + 统计表格 + 交易记录 + 参数配置面板，放入 **quant-app**
-  - **产出：** quant-app 回测报告界面 | **学习点：** egui 图表、表格布局
+  - **产出：** quant-app 回测报告界面 | **学习点：** gpui-kit 图表、DataTable 表格布局
   - **技术方案：** 见 [tech/05_backtest_layer.md § 5.4](tech/05_backtest_layer.md)
 
 - [ ] **T5.5 回测测试** — 在 **quant-app** 内编写测试，简单策略验证统计正确性 + 手续费/滑点影响
@@ -210,20 +210,20 @@
 | T2.3 | ⬜ | 数值算法、Multi 输出 | RSI + MACD（quant-data） |
 | T2.4 | ⬜ | 标准差、浮点精度 | 布林带（quant-data） |
 | T2.5 | ⬜ | 管道模式、近似断言 | 指标管道 + 测试（quant-data） |
-| T3.1 | ⬜ | eframe、即时模式 GUI | 应用入口 + 布局（quant-app） |
-| T3.2 | ⬜ | egui 控件、状态绑定 | 品种列表 + 控件（quant-app） |
-| T3.3 | ⬜ | Shape API、坐标变换 | K 线图自绘（quant-app） |
-| T3.4 | ⬜ | 曲线绘制、多子图 | 指标叠加 + 成交量（quant-app） |
+| T3.1 | ⬜ | gpui 启动、Entity/Render 模型 | 应用入口 + 布局（quant-app） |
+| T3.2 | ⬜ | gpui-kit 控件、状态绑定 | 品种列表 + 控件（quant-app） |
+| T3.3 | ⬜ | CandlestickChart、链式 API | K 线图渲染（quant-app） |
+| T3.4 | ⬜ | LineChart、多子图 | 指标叠加 + 成交量（quant-app） |
 | T3.5 | ⬜ | GUI 状态管理 | 数据接入 + 状态流转（quant-app） |
 | T4.1 | ⬜ | tokio-tungstenite、异步流 | WebSocket 客户端（quant-data） |
 | T4.2 | ⬜ | 嵌套 JSON 解析 | 消息处理（quant-data） |
 | T4.3 | ⬜ | mpsc channel、CancellationToken | 通道架构（quant-data） |
-| T4.4 | ⬜ | request_repaint、跨线程 UI | 实时 UI 集成（quant-app 消费 quant-data 数据） |
+| T4.4 | ⬜ | cx.spawn、cx.notify | 实时 UI 集成（quant-app 消费 quant-data 数据） |
 | T4.5 | ⬜ | 指数退避、错误恢复 | 断线重连（quant-data） |
 | T5.1 | ⬜ | 向量化计算、金融精度 | 回测引擎（quant-app） |
 | T5.2 | ⬜ | polars DataFrame | 数据加载（quant-app，读 quant-data） |
 | T5.3 | ⬜ | 统计计算 | 绩效统计（quant-app） |
-| T5.4 | ⬜ | egui 图表、表格布局 | 回测报告 UI（quant-app） |
+| T5.4 | ⬜ | gpui-kit 图表、DataTable | 回测报告 UI（quant-app） |
 | T5.5 | ⬜ | 金融计算测试 | 回测测试（quant-app） |
 | T6.1 | ⬜ | Strategy 模式、trait object | 策略框架（quant-app） |
 | T6.2 | ⬜ | 交叉检测、状态跟踪 | 均线交叉策略（quant-app） |

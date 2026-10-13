@@ -21,36 +21,41 @@
 
 ### 2.1 候选方案对比
 
-| 维度 | egui | iced | slint | tauri |
-|------|------|------|-------|-------|
-| **渲染模式** | 即时模式 (IMM) | 保留模式 (Elm) | 声明式 DSL | WebView |
-| **语言** | 纯 Rust | 纯 Rust | Slint DSL + Rust | JS/TS + Rust |
-| **GitHub Stars** | ~25,000+ | ~25,000+ | ~18,000+ | ~85,000+ |
-| **crates.io 下载量** | 1300 万+ | ~130 万 | ~50 万 | N/A (CLI 工具) |
-| **学习曲线** | ⭐ 最低 | ⭐⭐⭐ 中等 | ⭐⭐⭐ 中等 | ⭐⭐ 需前端栈 |
-| **图表生态** | egui_plot 开箱即用 | 需自行集成 | 无内置图表 | 依赖 JS 图表库 |
-| **tokio 集成** | 原生支持 | 原生支持 | 需桥接 | 需 IPC 桥接 |
-| **打包体积** | 4-6 MB | 10-20 MB | 5-9 MB | 50+ MB (WebView) |
-| **许可证** | MIT/Apache-2.0 | MIT/Apache-2.0 | GPLv3/商业 | MIT/Apache-2.0 |
-| **量化项目案例** | rust-trade 等 | 无已知 | 无已知 | 无已知 |
+| 维度 | gpui (+gpui-kit) | egui | iced | slint | tauri |
+|------|------------------|------|------|-------|-------|
+| **渲染模式** | GPU 渲染 + 保留模式 (Entity/Context) | 即时模式 (IMM) | 保留模式 (Elm) | 声明式 DSL | WebView |
+| **语言** | 纯 Rust | 纯 Rust | 纯 Rust | Slint DSL + Rust | JS/TS + Rust |
+| **文档** | gpui-kit.com 官方文档站，中英双语完整，组件逐个成篇 | 英文为主，示例分散 | 英文，中等 | 中等 | 丰富但需 JS 栈 |
+| **学习曲线** | ⭐⭐ 中等（Entity/Render + Taffy Flexbox，接近前端组件化心智） | ⭐ 最低 | ⭐⭐⭐ 中等 | ⭐⭐⭐ 中等 | ⭐⭐ 需前端栈 |
+| **图表生态** | 原生 CandlestickChart/LineChart/BarChart + Plot 底层绘图 | egui_plot 折线/散点，K 线需 Shape 自绘 | 需自行集成 | 无内置图表 | 依赖 JS 图表库 |
+| **交易组件** | DataTable(虚拟滚动)、Dock(可停靠面板)、Input(货币掩码) | 基本控件为主 | 较少 | 较多(商业版更全) | 依赖 JS 生态 |
+| **中文支持** | 系统字体直读(Windows 走 DirectWrite)，零配置 | 需手动加载中文字体文件 | 需配置字体 | 好 | 好(WebView) |
+| **tokio 集成** | cx.spawn + mpsc（异步消息模型） | 原生支持 | 原生支持 | 需桥接 | 需 IPC 桥接 |
+| **生产验证** | Longbridge 券商客户端（生产级交易终端） | rust-trade 等社区项目 | 无已知 | 商业嵌入式 | 大量 Web 混合应用 |
 
-### 2.2 决策：egui (eframe)
+### 2.2 决策：gpui + gpui-kit
 
-**选择 egui**，理由：
+**选择 gpui（配 gpui-kit 组件库，gpui-kit 0.7.3 为 crates.io 正式版）**，理由：
 
-1. **学习曲线最低** — 即时模式无需理解 Elm 架构或 DSL，纯 Rust 编写，前端开发者可快速上手
-2. **图表生态最佳** — egui_plot 提供折线图、散点图等金融图表基础组件，Shape API 可自定义 K 线 Candlestick
-3. **下载量碾压** — 1300 万+ 下载量，是 iced 的 10 倍，社区最活跃
-4. **已有量化验证** — 社区已有基于 egui 的量化交易项目 (rust-trade)，证明技术可行性
-5. **打包体积极小** — 4-6 MB，远小于 Tauri 的 WebView 方案
+1. **中英双语文档完善** — gpui-kit.com 提供完整 zh-CN 文档，chart/data-table/dock 等组件逐个成篇，比 egui 的散落示例详尽得多，对中文学习者友好
+2. **原生 K 线图组件** — gpui-kit 内置 CandlestickChart（链式 API 配置 OHLC 数据源，自动渲染 OHLC tooltip），同系列另有 LineChart/BarChart/AreaChart/PieChart，另有 Plot 底层绘图库（ScaleLinear/ScaleBand）覆盖自绘场景；无需 egui 那样用 Shape API 手写 K 线绘制
+3. **组件贴合交易终端** — DataTable（虚拟滚动/排序/异步 load_more 分页）、Dock（可停靠多面板/拖拽重排/布局持久化）、Input（`MaskPattern::Number` 货币掩码），正是行情终端与回测报告所需
+4. **Longbridge 生产级验证** — gpui-kit 由 Longbridge 开源并在生产级券商客户端中使用，组件质量经过真实交易场景检验
+5. **GPU 渲染 + 界面美观** — gpui 采用 GPU 渲染与 Taffy Flexbox 布局（Tailwind 风格链式 API），gpui-kit 提供 20+ 内置主题（明暗切换，primary/background/chart_1..5 token），观感远优于 egui 默认风格
+6. **中文零配置** — 桌面端直接使用系统字体（Windows 走 DirectWrite，默认 `.SystemUIFont` 即微软雅黑），无需像 egui 那样手动加载中文字体文件
 
-**已知局限**：即时模式每帧重绘带来功耗开销；默认字体不含中文，需手动加载字体文件。
+**已知约束**：
+
+- **依赖版本陷阱**：crates.io 的 `gpui 0.2.x` 与 gpui-kit 内部封装的 `gpui-pre 0.3.9` 是两条不兼容的发布线，**严禁直接添加 `gpui = "0.2"` 依赖**（会类型冲突）；gpui-kit 重导出全部 GPUI API，`use gpui_kit::*` 即可使用
+- **构建要求（Windows）**：MSVC toolchain（不能用 GNU）、CMake 在 PATH、Rust 1.92+、VS2022 Build Tools 的 C++ workload
+- **保留模式心智**：状态变更后必须 `cx.notify()` 才会重渲染，比 egui 即时模式多一步心智负担，但换来 Entity/Context 组件化模型
 
 ### 2.3 淘汰方案详析
 
 | 方案 | 淘汰原因 |
 |------|----------|
-| **iced** | Elm 架构学习曲线陡峭（需理解 State/Message 单向数据流）；图表生态弱，需自行集成；快速原型不如 egui 方便 |
+| **egui** | 默认字体不含中文，需手动加载字体文件；无原生 K 线/表格/停靠面板组件（K 线需 Shape API 自绘）；文档英文为主且示例分散；即时模式全帧重绘；默认观感朴素 |
+| **iced** | Elm 架构学习曲线陡峭（需理解 State/Message 单向数据流）；图表生态弱，需自行集成 K 线图 |
 | **slint** | 需学习 Slint DSL 额外语法；GPLv3 许可证限制闭源商用；嵌入式优化对桌面项目无意义 |
 | **tauri** | 需维护前端 (JS/TS) + Rust 两套工程；WebView 打包体积 50+ MB；IPC 桥接增加复杂度；与 tokio 集成需额外处理 |
 
@@ -118,13 +123,27 @@
 
 **唯一合理选择**。tokio-tungstenite 是 Rust WebSocket 领域 #1 crate（月下载量 1900 万+），基于 tokio，提供 `Stream + Sink` 异步流模型。无需对比。
 
-### 4.4 图表方案：egui_plot + Shape API
+### 4.4 图表方案：gpui-kit CandlestickChart + Plot
 
 | 方案 | 说明 | 决策 |
 |------|------|------|
-| **egui_plot** | egui 生态图表库，支持折线/散点/条形图 | 用于指标曲线（SMA/EMA/RSI/MACD） |
-| **Shape API** | egui 底层 Shape 绘制接口 | 用于自定义 Candlestick K 线图 |
-| plotters | 通用绑图库，支持 SVG/PNG | ❌ 非即时模式，与 egui 集成复杂 |
+| **CandlestickChart** | gpui-kit 原生 K 线图组件，链式 API 配置 OHLC 数据源与阴阳线配色，自动渲染 OHLC tooltip | 用于主图 K 线展示 |
+| **LineChart / BarChart / AreaChart** | gpui-kit 同系列图表组件 | 用于指标曲线（SMA/EMA/RSI/MACD）与成交量 |
+| **Plot** | gpui-kit 底层绘图库（ScaleLinear / ScaleBand） | 用于自绘图（盘口深度等定制场景） |
+| plotters | 通用绘图库，支持 SVG/PNG | ❌ 与 GPUI 渲染体系不兼容，集成复杂 |
+
+**CandlestickChart 用法示例**（加密货币配色：绿涨红跌）：
+
+```rust
+CandlestickChart::new(data)          // data: Vec<Kline> 等任意结构体
+    .x(|d| d.date.clone())
+    .open(|d| d.open).high(|d| d.high)
+    .low(|d| d.low).close(|d| d.close)
+    .body_width_ratio(0.4)
+    .bullish(cx.theme().success)     // 阳线色（加密货币绿涨）
+    .bearish(cx.theme().danger)      // 阴线色（加密货币红跌）
+// 自动渲染 OHLC tooltip，无需手绘
+```
 
 ### 4.5 技术指标：自行实现 vs 第三方库
 
@@ -218,9 +237,9 @@ serde_json = "1"
 polars = { version = "0.46", features = ["lazy", "temporal", "parquet"] }
 chrono = { version = "0.4", features = ["serde"] }
 
-# GUI
-eframe = "0.31"
-egui_plot = "0.32"
+# GUI（gpui-kit 内部封装 gpui-pre 0.3.9，use gpui_kit::* 即可获得全部 GPUI API；
+#      严禁直接添加 gpui = "0.2" —— 与 gpui-pre 是两条不兼容发布线，同时依赖会类型冲突）
+gpui-kit = "0.7.3"
 
 # 错误处理
 anyhow = "1"
@@ -235,6 +254,19 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # 测试
 tokio-test = "0.4"
+
+# dev 构建性能覆盖：GUI 相关依赖以 O3 编译，避免 debug 模式下 GPU 渲染/字体排版过慢
+[profile.dev.package]
+gpui-pre          = { opt-level = 3 }
+gpui-pre-macros   = { opt-level = 3 }
+gpui-pre-platform = { opt-level = 3 }
+gpui-kit          = { opt-level = 3 }
+gpui-kit-assets   = { opt-level = 3 }
+gpui-component    = { opt-level = 3 }
+gpui-base         = { opt-level = 3 }
+rustybuzz         = { opt-level = 3 }
+taffy             = { opt-level = 3 }
+ttf-parser        = { opt-level = 3 }
 ```
 
 ### 5.2 quant-data/Cargo.toml（library crate）
@@ -275,7 +307,7 @@ tokio-test = { workspace = true }
 name = "quant-app"
 version = "0.1.0"
 edition = "2021"
-description = "RustQuant 桌面应用：egui GUI、回测引擎、策略框架"
+description = "RustQuant 桌面应用：gpui + gpui-kit GUI、回测引擎、策略框架"
 
 [[bin]]
 name = "quant-app"
@@ -291,14 +323,15 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 polars = { workspace = true }
-eframe = { workspace = true }
-egui_plot = { workspace = true }
+gpui-kit = { workspace = true }   # 内含 gpui-pre 全量 API，use gpui_kit::* 使用
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 futures-util = { workspace = true }
 csv = { workspace = true }
 ```
+
+**构建要求（Windows）**：MSVC toolchain（不能用 GNU）、CMake 在 PATH、Rust 1.92+、VS2022 Build Tools 的 C++ workload。gpui-kit 只进 quant-app，quant-data 保持零 GUI 依赖。
 
 ---
 
@@ -312,8 +345,7 @@ csv = { workspace = true }
 | **序列化** | `serde_json` | 1.x | JSON 编解码 | Phase 1 |
 | **时间** | `chrono` | 0.4.x | 时间戳处理、K 线时间格式化 | Phase 1 |
 | **数据处理** | `polars` | 0.46.x | K 线 DataFrame、回测数据处理 | Phase 1 |
-| **GUI** | `eframe` | 0.31.x | egui 桌面应用框架 | Phase 3 |
-| **GUI** | `egui_plot` | 0.32.x | 指标折线图、散点图 | Phase 3 |
+| **GUI** | `gpui-kit` | 0.7.x | GPUI 组件库（内含 gpui-pre 全量 API 与 CandlestickChart/LineChart/DataTable/Dock 等组件），仅进 quant-app | Phase 3 |
 | **WebSocket** | `tokio-tungstenite` | 0.26.x | Binance 实时行情推送 | Phase 4 |
 | **异步流** | `futures-util` | 0.3.x | Stream/Sink 工具 trait | Phase 4 |
 | **错误(应用)** | `anyhow` | 1.x | 应用层错误处理 | Phase 1 |
@@ -329,10 +361,10 @@ csv = { workspace = true }
 
 | 决策项 | 选择 | 替代方案 | 关键理由 |
 |--------|------|---------|---------|
-| GUI 框架 | **egui (eframe)** | iced, slint, tauri | 学习曲线最低、egui_plot 图表生态、下载量 10x 于 iced |
+| GUI 框架 | **gpui + gpui-kit** | egui, iced, slint, tauri | 中英双语文档、原生 K 线/表格/Dock 组件、Longbridge 生产验证、GPU 渲染性能好 |
 | 数据源 | **Binance API** | Tushare (A 股), Alpha Vantage (美股) | 零门槛、免费、REST+WebSocket、7×24 |
 | 数据处理 | **polars** | ndarray | DataFrame 贴合 K 线、类 pandas API |
-| 图表 | **egui_plot + Shape** | plotters | egui 原生集成、Shape 自定义 K 线 |
+| 图表 | **gpui-kit CandlestickChart + Plot** | plotters | 原生 K 线组件、自动 OHLC tooltip、Plot 覆盖自绘场景 |
 | 技术指标 | **自行实现** | ta, centaur_technical_indicators | Trait + 泛型学习价值极高 |
 | 回测 | **自建向量化引擎** | barter-rs, NautilusTrader | 学习 polars + 回测原理 |
 | HTTP | **reqwest** | — | Rust 最成熟 HTTP 库，原生 tokio |

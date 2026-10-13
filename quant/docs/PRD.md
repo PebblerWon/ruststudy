@@ -7,12 +7,12 @@
 **学习衔接：** myapp（CLI 基础）→ rustkv（并发/异步/高级 trait）→ RustQuant（GUI / 可视化 / 实时 / 回测 / 金融计算）
 
 **核心价值：**
-- 补全 GUI 编程能力（egui 桌面应用，填补前序项目纯 CLI 的空白）
+- 补全 GUI 编程能力（gpui + gpui-kit 桌面应用，填补前序项目纯 CLI 的空白）
 - 深入异步 Rust（tokio + reqwest 并发请求 + tungstenite WebSocket）
 - 了解量化交易基础（K 线、技术指标、实时行情、策略回测）
-- 实践数据可视化（自绘 K 线图、指标曲线、实时价格闪烁）
+- 实践数据可视化（原生 K 线图组件、指标曲线、实时价格闪烁）
 
-**技术栈：** egui + eframe (GUI) | tokio + reqwest (异步/HTTP) | tungstenite (WebSocket) | polars (数据) | serde (序列化) | anyhow + thiserror (错误)
+**技术栈：** gpui + gpui-kit (GUI) | tokio + reqwest (异步/HTTP) | tungstenite (WebSocket) | polars (数据) | serde (序列化) | anyhow + thiserror (错误)
 
 ## 2. 目标用户
 
@@ -26,9 +26,9 @@ Rust 初学者（项目所有者），前端背景，已完成 myapp + rustkv，
   - 验收：缓存命中不重复请求；网络异常有友好提示
 - **F2 技术指标**：自行实现 SMA/EMA/RSI/MACD/布林带，抽象为 Indicator trait
   - 验收：与 TradingView 误差 < 0.01%；新增指标只需实现 trait
-- **F3 主界面仪表盘**：egui 桌面，品种列表 + K 线图 + 指标面板 + 状态栏
+- **F3 主界面仪表盘**：gpui 桌面，品种列表 + K 线图 + 指标面板 + 状态栏
   - 验收：品种/周期流畅切换；有 loading 态；状态栏显示连接状态
-- **F4 K 线图渲染**：egui Shape API 自绘 Candlestick，缩放/平移，叠加指标曲线 + 成交量
+- **F4 K 线图渲染**：gpui-kit CandlestickChart 原生 K 线组件，缩放/平移，叠加指标曲线 + 成交量
   - 验收：红绿蜡烛正确；交互流畅无卡顿
 
 ### 3.2 P1 增强功能（Phase 4-5 交付）
@@ -70,8 +70,8 @@ Rust 初学者（项目所有者），前端背景，已完成 myapp + rustkv，
 
 **Phase 3 — 界面层**
 
-- egui 桌面应用：主界面仪表盘（品种列表 + K 线图 + 指标面板 + 状态栏）
-- 自绘 K 线图：Shape API Candlestick，支持缩放/平移/指标叠加
+- gpui 桌面应用：主界面仪表盘（品种列表 + K 线图 + 指标面板 + 状态栏）
+- K 线图渲染：gpui-kit CandlestickChart 原生组件，支持缩放/平移/指标叠加
 - 品种/周期切换流畅，有 loading 态
 
 **Phase 4 — 实时层**
@@ -201,7 +201,7 @@ trait Strategy {
 |---------|----------|-------|--------|
 | REST API | reqwest + async/await | ❌ | ✅ |
 | 技术指标 | Iterator + 泛型 + 数值计算 | ❌ | ❌ |
-| egui 界面 | GUI + 事件驱动 + 自绘 | ❌ | ❌ |
+| gpui 界面 | GUI + 事件驱动 + 组件化渲染 | ❌ | ❌ |
 | WebSocket 实时数据 | tungstenite + 异步流 + 并发状态 | ❌ | ❌ |
 | 回测引擎 | polars + 向量化计算 | ❌ | ❌ |
 | 策略模式 | trait 抽象 + 泛型 + 动态分发 | ❌ | ❌ |

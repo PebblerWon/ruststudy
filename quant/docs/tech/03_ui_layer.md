@@ -4,885 +4,505 @@
 
 ### 本阶段目标
 
-使用 egui + eframe 搭建 RustQuant 主界面仪表盘，实现：
-- 左侧品种列表侧边栏（WatchlistPanel）
-- 中央 K 线图区域（CandlestickChart）
-- 底部指标面板（IndicatorPanel）
-- 顶部工具栏 + 底部状态栏
+使用 gpui + gpui-kit（Longbridge 出品，crates.io 正式版）搭建 RustQuant 主界面仪表盘，实现：
+- 左侧品种列表侧边栏（WatchlistPanel）、中央 K 线图区域（CandlestickChart 原生组件）
+- 右侧指标面板（IndicatorPanel）、顶部工具栏 + 底部状态栏
 
 ### 覆盖的 Rust 知识点
 
 | 知识点 | 在 UI 层的应用场景 |
 |--------|-------------------|
-| egui 即时模式 GUI | 每帧重绘心智模型、`ui.horizontal()`/`ui.vertical()` 布局 |
-| eframe::App trait | 应用生命周期管理、`update()` 回调 |
-| 状态管理 | `AppState` 集中管理 UI 状态、`Arc<Mutex<>>` 跨线程共享 |
-| 自定义绘制 | egui `Shape` API（`RectShape`、`LineShape`）绘制 K 线 |
-| 坐标变换 | 价格→像素、时间→像素的仿射映射 |
+| gpui Entity/Context 模型 | `cx.new` 创建视图返回 `Entity<T>`，状态变更后 `cx.notify()` 驱动按需重渲染 |
+| Render trait | `render()` 每次调用构建元素树（保留模式 UI） |
+| Taffy Flexbox 布局 | Tailwind 风格链式样式、`v_flex()` / `h_flex()` 辅助函数 |
+| gpui-kit 组件体系 | CandlestickChart、DataTable、Dock、Input、Select、Button、Badge、Theme |
+| tokio 桥接基础 | `cx.spawn` 前台任务消费 mpsc、WeakEntity 跨 runtime 更新 UI（Phase 4 深入） |
 
 ### 与 Phase 1/2 的衔接
 
 ```
 Phase 1 (data)          Phase 2 (indicators)       Phase 3 (ui)
 ┌──────────────┐        ┌──────────────┐          ┌──────────────┐
-│  DataFetcher │        │  SMA/EMA/RSI │          │  egui 界面    │
+│  DataFetcher │        │  SMA/EMA/RSI │          │  gpui 界面    │
 │  KlineStore  │───────▶│  MACD/BB     │─────────▶│  K 线图渲染   │
 │  Kline/Ticker│        │  Indicator   │          │  指标叠加     │
 └──────────────┘        └──────────────┘          └──────────────┘
 ```
 
-- **数据层**提供 `Kline`、`Ticker` 数据 → UI 层消费并渲染
-- **指标层**提供 `IndicatorValues` → UI 层叠加曲线
+- **数据层**提供 `Kline`、`Ticker` → UI 层消费渲染；**指标层**提供 `IndicatorValues` → 叠加曲线
 - UI 层不直接调用 REST API，通过 `KlineStore` 获取已缓存数据
 
 ---
 
-## 3.2 应用入口与 eframe 配置
+## 3.2 应用入口与 gpui 配置
 
-### quant-app/Cargo.toml 依赖配置（Phase 3 涉及的 crate）
+### quant-app/Cargo.toml 依赖配置
 
 ```toml
 # quant-app/Cargo.toml
-
-[package]
-name = "quant-app"
-version = "0.1.0"
-edition = "2021"
-description = "RustQuant 桌面应用：egui GUI、回测引擎、策略框架"
-
-[[bin]]
-name = "quant-app"
-path = "src/main.rs"
-
 [dependencies]
-# 项目内部 crate
 quant-data = { path = "../quant-data" }
-
+# GUI：gpui-kit 重导出全部 GPUI API（use gpui_kit::*; 即可）
+# 严禁直接添加 gpui 依赖——与 gpui-kit 是两条不兼容的发布线
+gpui-kit = "0.7.3"
 # 继承 workspace 依赖
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
-eframe = { workspace = true }
-egui_plot = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 ```
 
-### main.rs 启动配置
+同步清理：根 `Cargo.toml` 的 `[workspace.dependencies]` 删除 `eframe`、`egui_plot`；gpui-kit 只在 quant-app 声明。
+
+### workspace profile 性能覆盖
+
+```toml
+# 根 Cargo.toml（workspace）追加：debug 下依赖默认 O0，gpui 渲染会明显卡顿，
+# 为第三方依赖启用基础优化（自身代码仍为 O0，保留快速编译与断点调试）
+[profile.dev.package."*"]
+opt-level = 1
+```
+
+### 构建要求
+
+MSVC toolchain（DirectX/DirectWrite 后端需 MSVC 链接器）、CMake 在 PATH（部分原生依赖构建需要）、Rust 1.92+（gpui-kit 0.7.3 最低工具链版本）。
+
+### main.rs 启动三段式
 
 ```rust
 // src/main.rs
-use eframe::NativeOptions;
-use crate::ui::app::QuantApp;
+use gpui_kit::*;
+use gpui_kit::assets::Assets;
 
-#[tokio::main]
-async fn main() -> eframe::Result {
-    // 初始化 tracing 日志
-    tracing_subscriber::fmt()
-        .with_env_filter("quant_app=info")
-        .init();
+fn main() {
+    // gpui 启动三段式：application → init → open_window
+    gpui_kit::application()
+        .with_assets(Assets)              // 内置图标/资源加载
+        .run(|cx| {
+            gpui_kit::init(cx);           // ① 初始化（必须在开窗前调用）
+            gpui_kit::open_window(        // ② 开窗并挂载根视图
+                WindowOptions::default(), //    标题/尺寸等配置见官方文档
+                cx,
+                |_, cx| cx.new(|_| crate::ui::app::QuantApp::new()),
+            ).expect("Failed to open window");
+        });
+}
+```
 
-    // eframe 窗口配置
-    let options = NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_title("RustQuant — 桌面量化交易系统")
-            .with_inner_size([1280.0, 800.0])
-            .with_min_inner_size([800.0, 600.0]),
-        ..Default::default()
-    };
+注意：`main` 不是 async——GPUI 有自己的前台执行器，tokio runtime 的启动与桥接见 tech/04 §4.6/§4.7。
 
-    // 启动 egui 应用
-    eframe::run_native(
-        "RustQuant",
-        options,
-        Box::new(|cc| {
-            // 加载自定义中文字体
-            setup_fonts(&cc.egui_ctx);
-            Ok(Box::new(QuantApp::new(cc)))
-        }),
-    )
+### QuantApp 根视图实现 Render trait
+
+```rust
+// src/ui/app.rs
+use gpui_kit::*;
+use quant_data::common::models::{Kline, Ticker, Interval};
+
+pub struct QuantApp {
+    pub state: Entity<AppState>,               // 集中状态（§3.8）
+    pub watchlist: Entity<WatchlistPanel>,     // 面板 Entity：render 时插入 Dock 工作区
+    pub chart: Entity<ChartPanel>,
+    pub indicator_panel: Entity<IndicatorPanel>,
 }
 
-/// 加载中文字体（egui 默认字体不含中文）
-fn setup_fonts(ctx: &egui::Context) {
-    let mut fonts = egui::FontDefinitions::default();
-    fonts.font_data.insert(
-        "my_chinese_font".to_owned(),
-        egui::FontData::from_static(include_bytes!("../../assets/SourceHanSansSC-Regular.otf")),
-    );
-    fonts
-        .families
-        .entry(egui::FontFamily::Proportional)
-        .or_default()
-        .insert(0, "my_chinese_font".to_owned());
+impl Render for QuantApp {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // 每次调用重建元素树；只有被 notify 的视图才会真正重绘
+        v_flex().size_full()
+            .child(self.render_toolbar(window, cx))     // 顶部工具栏（§3.7）
+            .child(self.render_dock(window, cx))        // Dock 多面板工作区（§3.3）
+            .child(self.render_status_bar(window, cx))  // 底部状态栏（§3.7）
+    }
+    // render_toolbar / render_dock / render_status_bar 为私有辅助方法（骨架从略）
 }
 ```
 
 ### 设计要点
 
-- `#[tokio::main]` 启动异步运行时，eframe 内部会复用此 runtime
-- 中文字体必须手动加载，否则中文显示为方块
-- `ViewportBuilder` 配置窗口标题、默认尺寸、最小尺寸
-- `Box::new(|cc| ...)` 闭包在应用启动时执行一次，用于初始化 `QuantApp`
+- `init(cx)` 必须在 `open_window` 之前调用（注册组件全局状态/主题）
+- `cx.new(|_| QuantApp::new())` 返回 `Entity<QuantApp>`，生命周期由 GPUI 接管；中文字体无需配置（§3.9）
 
 ---
 
 ## 3.3 主界面布局
 
-### Panel 系统划分
+### gpui 布局系统与 Dock 工作区
+
+- 布局基于 **Taffy Flexbox**，样式为 **Tailwind 风格链式** API：`div().flex().flex_col().size_full().gap_2()`；gpui-kit 提供 `v_flex()`（纵向）/ `h_flex()`（横向）辅助
+- 主工作区使用 gpui-kit **Dock** 组件（可停靠、可拖拽、布局可 serde 持久化）：
+
+```rust
+// src/ui/app.rs（render_dock 部分，骨架）
+// 面板协议：每个 Dock 面板需实现 BasePanel + Panel + Render + Focusable + EventEmitter<PanelEvent>
+// 组装：DockSkin::dock_area(...) 创建工作区，
+// DockLayout::h_split()（水平分割）/ tabs()（标签页）组合出三区布局；
+// 布局树可 serde 持久化到本地，下次启动还原（组合 API 见官方文档 Dock 页）
+```
+
+### 布局示意
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│                    TopPanel (工具栏)                       │
+│                Toolbar (工具栏)                            │
 │  [交易对选择 ▼]  [1m] [5m] [15m] [1h] [4h] [1d]          │
-├──────────┬───────────────────────────────────────────────┤
-│          │                                               │
-│ SidePanel│           CentralPanel                        │
-│ (品种列表)│          (K 线图区域)                          │
-│          │                                               │
-│ BTCUSDT  │    ┌─────────────────────────────────┐        │
-│ ETHUSDT  │    │     CandlestickChart            │        │
-│ BNBUSDT  │    │     (自定义 Shape 绘制)           │        │
-│ SOLUSDT  │    │                                 │        │
-│ ...      │    └─────────────────────────────────┘        │
-│          │                                               │
-│          ├───────────────────────────────────────────────┤
-│          │           BottomPanel (指标面板)               │
-│          │    [SMA] [EMA] [RSI] [MACD] [BB]              │
-│          │    ┌─────────────────────────────────┐        │
-│          │    │     IndicatorPanel              │        │
-│          │    └─────────────────────────────────┘        │
-├──────────┴───────────────────────────────────────────────┤
-│                    StatusBar (状态栏)                      │
-│  ● 已连接  |  BTCUSDT: 65,432.10  |  更新: 12:34:56     │
+├──────────┬─────────────────────────────┬─────────────────┤
+│ Watchlist│      ChartArea (K 线图)      │  IndicatorPanel │
+│ (品种列表)│   CandlestickChart          │  (指标面板)      │
+│ BTCUSDT  │   gpui-kit 原生组件          │  SMA/EMA/RSI    │
+│ ETHUSDT  │   内置缩放/平移/tooltip       │  MACD/BB        │
+├──────────┴─────────────────────────────┴─────────────────┤
+│        StatusBar：● 已连接 | BTCUSDT 65,432.10 | 更新      │
 └──────────────────────────────────────────────────────────┘
-```
-
-### 布局代码骨架
-
-```rust
-// src/ui/app.rs
-use eframe::egui;
-
-pub struct QuantApp {
-    state: AppState,
-    // 子面板
-    watchlist: WatchlistPanel,
-    chart: CandlestickChart,
-    indicator_panel: IndicatorPanel,
-}
-
-impl eframe::App for QuantApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // 顶部工具栏
-        egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
-            self.toolbar_ui(ui);
-        });
-
-        // 底部状态栏
-        egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
-            self.status_bar_ui(ui);
-        });
-
-        // 底部指标面板
-        egui::TopBottomPanel::bottom("indicator_panel")
-            .default_height(200.0)
-            .show(ctx, |ui| {
-                self.indicator_panel.ui(ui, &mut self.state);
-            });
-
-        // 左侧品种列表
-        egui::SidePanel::left("watchlist")
-            .default_width(200.0)
-            .show(ctx, |ui| {
-                self.watchlist.ui(ui, &mut self.state);
-            });
-
-        // 中央 K 线图
-        egui::CentralPanel::default().show(ctx, |ui| {
-            self.chart.ui(ui, &mut self.state);
-        });
-    }
-}
 ```
 
 ### 设计要点
 
-- Panel 添加顺序影响布局：先添加 `TopBottomPanel`，再添加 `SidePanel`，最后 `CentralPanel` 填充剩余空间
-- `default_height` / `default_width` 设置面板默认尺寸，用户可拖拽调整
-- 即时模式：`update()` 每帧调用，所有 UI 状态在调用间保持
+- **保留模式 UI**：Entity 树持久存在，`render()` 按需重执行（对比 egui 每帧全量重绘，§3.9）
+- Dock 支持面板拖拽重排与布局持久化；根容器 `v_flex().size_full()` 铺满窗口
 
 ---
 
 ## 3.4 品种列表侧边栏
 
-### WatchlistPanel 结构体
+### WatchlistPanel：v_flex 列表 + Input 搜索
 
 ```rust
-// src/ui/control_panel.rs
-use egui::{Ui, Color32, RichText};
+// src/ui/watchlist.rs
+use gpui_kit::*;
 
 pub struct WatchlistPanel {
-    /// 搜索过滤关键词
-    filter: String,
-    /// 品种列表数据（从 data 层获取）
-    symbols: Vec<WatchlistItem>,
-}
-
-pub struct WatchlistItem {
-    pub symbol: String,
-    pub price: f64,
-    pub change_24h: f64,  // 24h 涨跌幅百分比
+    pub filter_input: Entity<InputState>,  // 搜索框（gpui-kit Input）
+    pub filter: String,                    // 过滤关键词（InputEvent::Change 更新）
+    pub items: Vec<WatchlistItem>,         // 品种数据（symbol / price / change_24h）
 }
 
 impl WatchlistPanel {
-    pub fn ui(&mut self, ui: &mut Ui, state: &mut AppState) {
-        // 搜索框
-        ui.horizontal(|ui| {
-            ui.label("🔍");
-            ui.text_edit_singleline(&mut self.filter);
-        });
-        ui.separator();
-
-        // 表头
-        ui.horizontal(|ui| {
-            ui.strong("交易对");
-            ui.add_space(ui.available_width() - 120.0);
-            ui.strong("价格");
-            ui.strong("24h%");
-        });
-        ui.separator();
-
-        // 品种列表（可滚动区域）
-        egui::ScrollArea::vertical().show(ui, |ui| {
-            for item in self.filtered_items() {
-                let is_selected = state.selected_symbol == item.symbol;
-                let bg_color = if is_selected {
-                    ui.visuals().selection.bg_fill
-                } else {
-                    Color32::TRANSPARENT
-                };
-
-                ui.horizontal(|ui| {
-                    // 点击选中交易对
-                    let response = ui
-                        .scope(|ui| {
-                            ui.set_min_width(ui.available_width());
-                            ui.horizontal(|ui| {
-                                ui.label(RichText::new(&item.symbol).strong());
-                                ui.add_space(ui.available_width() - 120.0);
-                                ui.label(format!("{:.2}", item.price));
-                                // 涨跌幅颜色：涨绿跌红
-                                let change_color = if item.change_24h >= 0.0 {
-                                    Color32::from_rgb(0, 200, 83)
-                                } else {
-                                    Color32::from_rgb(234, 57, 67)
-                                };
-                                ui.label(
-                                    RichText::new(format!("{:+.2}%", item.change_24h))
-                                        .color(change_color),
-                                );
-                            })
-                        })
-                        .response;
-
-                    if response.clicked() {
-                        state.selected_symbol = item.symbol.clone();
-                        state.load_kline_data();  // 触发数据加载
-                    }
-                });
-            }
-        });
+    /// 品种行渲染：v_flex 列表（品种少时比 DataTable 更轻量）
+    fn render_items(&mut self, state: &Entity<AppState>, cx: &mut Context<Self>) -> impl IntoElement {
+        let selected = state.read(cx).selected_symbol.clone();
+        v_flex().flex_1().overflow_y_scroll().children(self.filtered_items().map(|item| {
+            // 涨跌幅颜色：涨绿跌红（加密货币惯例）
+            let color = if item.change_24h >= 0.0 { cx.theme().success } else { cx.theme().danger };
+            h_flex().px_2().py_1().gap_2()
+                .when(selected == item.symbol, |el| el.bg(cx.theme().primary.opacity(0.15))) // 选中高亮
+                .child(item.symbol.clone())
+                .child(format!("{:.2}", item.price))
+                .child(div().text_color(color).child(format!("{:+.2}%", item.change_24h)))
+                .on_click(cx.listener(move |this, _ev, window, cx| this.select_symbol(&item.symbol, window, cx)))
+        }))
     }
 
-    /// 根据搜索过滤返回品种列表
-    fn filtered_items(&self) -> Vec<&WatchlistItem> {
-        if self.filter.is_empty() {
-            self.symbols.iter().collect()
-        } else {
-            self.symbols
-                .iter()
-                .filter(|item| item.symbol.to_lowercase().contains(&self.filter.to_lowercase()))
-                .collect()
-        }
-    }
+    /// 选中交易对：state.update 写入 AppState + cx.emit 广播 + cx.notify（§3.8）
+    fn select_symbol(&mut self, symbol: &str, _w: &mut Window, cx: &mut Context<Self>) { /* ... */ }
+    /// 大小写不敏感过滤
+    fn filtered_items(&self) -> impl Iterator<Item = &WatchlistItem> { /* ... */ }
 }
+```
+
+### 搜索过滤（Input 事件订阅）
+
+```rust
+// WatchlistPanel::new 中创建 Input 并订阅变更事件
+let filter_input = cx.new(|cx| InputState::new(window, cx).placeholder("搜索交易对..."));
+cx.subscribe_in(&filter_input, window, |this, input, event, _window, cx| {
+    match event {
+        InputEvent::Change => {
+            this.filter = input.read(cx).value().to_string();  // 读取当前文本
+            cx.notify();                                       // 重渲染列表
+        }
+        _ => {}
+    }
+}).detach();
 ```
 
 ### 设计要点
 
-- `ScrollArea::vertical()` 使品种列表可滚动，避免品种过多时溢出
-- 搜索过滤使用大小写不敏感匹配
-- 选中状态通过 `AppState.selected_symbol` 管理，点击后触发 K 线数据加载
-- 涨跌幅颜色：涨绿 (`rgb(0,200,83)`) 跌红 (`rgb(234,57,67)`)
+- 品种行 `h_flex()` 横排：名称 / 价格 / 涨跌幅，配色取 `cx.theme().success / .danger`
+- 选中状态写入共享 `Entity<AppState>`，图表面板经订阅事件刷新；品种量大时换 DataTable（见 tech/06 §6.6）
 
 ---
 
 ## 3.5 K 线图渲染（核心）
 
-### CandlestickChart 模块
+### gpui-kit CandlestickChart：原生 K 线组件
 
-K 线图是 UI 层最核心的组件，使用 egui 底层 `Shape` API 自定义绘制。
+直接使用 gpui-kit **CandlestickChart** 原生组件，内置缩放/平移/自动 OHLC tooltip，无需手绘。
 
 ```rust
 // src/ui/chart.rs
-use egui::{pos2, vec2, Color32, Pos2, Rect, Response, Sense, Stroke, Ui};
-use egui::epaint::{RectShape, PathShape, CircleShape};
+use gpui_kit::*;
+use quant_data::common::models::Kline;
 
-pub struct CandlestickChart {
-    /// 可视区域起始时间索引（平移偏移量）
-    scroll_offset: usize,
-    /// 每根蜡烛的像素宽度
-    candle_width: f32,
-    /// 蜡烛间距比例
-    gap_ratio: f32,
+/// CandlestickChart 需要的数据点结构
+#[derive(Clone)]
+pub struct CandleData {
+    pub time: String,
+    pub open: f64,
+    pub high: f64,
+    pub low: f64,
+    pub close: f64,
 }
 
-/// 单根蜡烛的绘制参数
-struct CandleGeometry {
-    body_rect: Rect,      // 实体矩形 (open-close)
-    wick_top: (Pos2, Pos2), // 上影线 (high → body_top)
-    wick_bot: (Pos2, Pos2), // 下影线 (low → body_bottom)
-    color: Color32,
-}
-
-impl CandlestickChart {
-    pub fn new() -> Self {
-        Self {
-            scroll_offset: 0,
-            candle_width: 8.0,
-            gap_ratio: 0.3,
-        }
-    }
-
-    pub fn ui(&mut self, ui: &mut Ui, state: &mut AppState) {
-        let klines = &state.current_klines;
-        if klines.is_empty() {
-            ui.centered_and_justified(|ui| {
-                ui.label("暂无 K 线数据");
-            });
-            return;
-        }
-
-        // 计算可视范围
-        let available_count = (ui.available_width() / self.candle_width) as usize;
-        let end = klines.len().saturating_sub(self.scroll_offset);
-        let start = end.saturating_sub(available_count);
-        let visible = &klines[start..end];
-
-        // 计算价格范围
-        let (price_min, price_max) = self.price_range(visible);
-        let price_padding = (price_max - price_min) * 0.05;
-        let price_min = price_min - price_padding;
-        let price_max = price_max + price_padding;
-
-        // 分配绘制区域（留出坐标轴空间）
-        let (rect, response) = ui.allocate_exact_size(
-            ui.available_size(),
-            Sense::click_and_drag(),
-        );
-
-        // 坐标变换闭包
-        let price_to_y = |price: f64| -> f32 {
-            let ratio = (price - price_min) / (price_max - price_min);
-            rect.bottom() - (ratio as f32 * rect.height())
-        };
-        let index_to_x = |i: usize| -> f32 {
-            rect.left() + (i as f32 + 0.5) * self.candle_width
-        };
-
-        // 绘制背景网格
-        self.draw_grid(ui, rect, price_min, price_max, &price_to_y);
-
-        // 绘制每根蜡烛
-        let painter = ui.painter_at(rect);
-        for (i, kline) in visible.iter().enumerate() {
-            let geo = self.candle_geometry(kline, i, &price_to_y, &index_to_x);
-            self.draw_candle(&painter, &geo);
-        }
-
-        // 绘制坐标轴
-        self.draw_price_axis(ui, rect, price_min, price_max, &price_to_y);
-        self.draw_time_axis(ui, rect, visible, &index_to_x);
-
-        // 处理交互：缩放 + 平移
-        self.handle_zoom(&response, state);
-        self.handle_pan(&response);
-    }
-
-    /// 计算单根蜡烛的几何参数
-    fn candle_geometry(
-        &self,
-        kline: &Kline,
-        index: usize,
-        price_to_y: &impl Fn(f64) -> f32,
-        index_to_x: &impl Fn(usize) -> f32,
-    ) -> CandleGeometry {
-        let x = index_to_x(index);
-        let half_w = self.candle_width * (1.0 - self.gap_ratio) / 2.0;
-        let is_bullish = kline.close >= kline.open;
-
-        let body_top = price_to_y(kline.open.max(kline.close));
-        let body_bot = price_to_y(kline.open.min(kline.close));
-        let body_rect = Rect::from_min_max(
-            pos2(x - half_w, body_top),
-            pos2(x + half_w, body_bot.max(body_top + 1.0)), // 最小 1px 高度
-        );
-
-        let color = if is_bullish {
-            Color32::from_rgb(0, 200, 83)     // 涨：绿色
-        } else {
-            Color32::from_rgb(234, 57, 67)     // 跌：红色
-        };
-
-        CandleGeometry {
-            body_rect,
-            wick_top: (pos2(x, price_to_y(kline.high)), pos2(x, body_top)),
-            wick_bot: (pos2(x, body_bot), pos2(x, price_to_y(kline.low))),
-            color,
-        }
-    }
-
-    /// 绘制单根蜡烛
-    fn draw_candle(&self, painter: &egui::Painter, geo: &CandleGeometry) {
-        // 影线（上下各一条细线）
-        let wick_stroke = Stroke::new(1.0, geo.color);
-        painter.line_segment(geo.wick_top, wick_stroke);
-        painter.line_segment(geo.wick_bot, wick_stroke);
-
-        // 实体矩形
-        painter.add(RectShape::filled(geo.body_rect, 0.0, geo.color));
-    }
-
-    /// 鼠标滚轮缩放
-    fn handle_zoom(&mut self, response: &Response, _state: &mut AppState) {
-        if response.hovered() {
-            let scroll = _state.ctx_input_scroll(); // 从 ctx 获取滚轮增量
-            if scroll != 0.0 {
-                self.candle_width = (self.candle_width + scroll * 0.5).clamp(2.0, 30.0);
-            }
-        }
-    }
-
-    /// 鼠标拖拽平移
-    fn handle_pan(&mut self, response: &Response) {
-        if response.dragged_by(egui::PointerButton::Primary) {
-            let dx = response.drag_delta().x;
-            let candles_delta = (dx / self.candle_width).round() as i32;
-            if candles_delta != 0 {
-                self.scroll_offset = self.scroll_offset.saturating_add_signed(-candles_delta);
-            }
-        }
-    }
-
-    /// 计算可视区域的价格范围
-    fn price_range(&self, klines: &[Kline]) -> (f64, f64) {
-        let mut min = f64::MAX;
-        let mut max = f64::MIN;
-        for k in klines {
-            min = min.min(k.low);
-            max = max.max(k.high);
-        }
-        (min, max)
-    }
-
-    /// 绘制背景网格线
-    fn draw_grid(&self, ui: &mut Ui, rect: Rect, price_min: f64, price_max: f64,
-                 price_to_y: &impl Fn(f64) -> f32) { /* ... */ }
-
-    /// 绘制价格轴（右侧）
-    fn draw_price_axis(&self, ui: &mut Ui, rect: Rect, price_min: f64, price_max: f64,
-                       price_to_y: &impl Fn(f64) -> f32) { /* ... */ }
-
-    /// 绘制时间轴（底部）
-    fn draw_time_axis(&self, ui: &mut Ui, rect: Rect, klines: &[Kline],
-                      index_to_x: &impl Fn(usize) -> f32) { /* ... */ }
+/// Kline → CandleData 转换（open_time 格式化为坐标轴标签）
+pub fn to_candles(klines: &[Kline]) -> Vec<CandleData> {
+    klines.iter().map(|k| CandleData {
+        time: chrono::DateTime::from_timestamp_millis(k.open_time)
+            .map(|dt| dt.format("%m-%d %H:%M").to_string()).unwrap_or_default(),
+        open: k.open, high: k.high, low: k.low, close: k.close,
+    }).collect()
 }
 ```
 
-### 坐标变换算法说明
+### ChartPanel 渲染
 
+```rust
+impl Render for ChartPanel {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let candles = to_candles(&self.klines);
+        if candles.is_empty() {
+            return div().size_full().flex().items_center().justify_center().child("暂无 K 线数据");
+        }
+        // 访问器闭包描述"怎么读数据"；坐标变换/缩放/平移/tooltip 组件内置
+        CandlestickChart::new(candles)
+            .x(|d| d.time.clone())
+            .open(|d| d.open).high(|d| d.high).low(|d| d.low).close(|d| d.close)
+            .body_width_ratio(0.4)          // 蜡烛实体宽度占格子比例
+            .bullish(cx.theme().success)    // 阳线：绿涨（加密货币惯例）
+            .bearish(cx.theme().danger)     // 阴线：红跌
+        // 鼠标悬停自动渲染 OHLC tooltip，无需任何绘制代码
+    }
+}
 ```
-价格 → Y 像素：
-  ratio = (price - price_min) / (price_max - price_min)
-  y = rect.bottom - ratio * rect.height
 
-  注意：屏幕坐标系 Y 轴向下，价格越高 Y 越小
+### 指标曲线叠加
 
-索引 → X 像素：
-  x = rect.left + (index + 0.5) * candle_width
+1. **Plot 层自定义**（参考线/自定义元素）：`#[derive(IntoPlot)]` 实现 `Plot` trait，用 `ScaleLinear`（值域→像素域线性映射）把指标值画进图表坐标系
+2. **LineChart 组件**：MA 类单线指标用同系列 `LineChart`，色板取 `cx.theme().chart_1..5`
 
-  +0.5 使蜡烛居中在格子内
+```rust
+// 方式 1 骨架
+#[derive(IntoPlot)]
+struct IndicatorOverlay {
+    values: Vec<f64>,   // 指标值序列（与 K 线索引对齐）
+    color: Hsla,        // 曲线颜色（cx.theme().chart_1..5）
+}
+impl Plot for IndicatorOverlay {
+    // ScaleLinear 将指标值域映射到图表像素域，逐点连线（详见官方文档 Plot 页）
+}
 ```
+
+### 与 egui 手绘方案的对比
+
+| 能力 | egui Shape API 手绘 | gpui-kit CandlestickChart |
+|------|--------------------|--------------------------|
+| 坐标变换 / 缩放 / 平移 | 手写仿射映射 + `handle_zoom` / `handle_pan` | 组件内置交互 |
+| OHLC tooltip / 网格 / 坐标轴 | 自行实现 | 内置 |
+| K 线部分代码量 | ~300 行 | ~30 行 |
 
 ### 设计要点
 
-- **Shape API 选择**：`RectShape` 绘制蜡烛实体，`line_segment` 绘制影线，性能优于 `PathShape`
-- **颜色规范**：涨绿 `rgb(0,200,83)`、跌红 `rgb(234,57,67)`，与侧边栏涨跌幅一致
-- **缩放范围**：`candle_width` 限制在 `[2.0, 30.0]`，防止过小或过大
-- **性能考虑**：只绘制可视区域内的蜡烛（`start..end` 切片），避免全量遍历
-- **最小高度**：实体矩形高度至少 1px (`body_bot.max(body_top + 1.0)`)，防止十字线不可见
+- 访问器闭包把数据结构与组件解耦；涨跌配色遵循加密货币惯例（bullish 绿 / bearish 红）
+- 同系列 `LineChart` / `BarChart` / `AreaChart` 供指标面板复用
 
 ---
 
 ## 3.6 指标面板
 
-### IndicatorPanel 结构体
-
 ```rust
 // src/ui/indicator_panel.rs
-use egui::{Ui, Color32};
-use egui_plot::{Plot, Line, PlotPoints};
-
-/// 当前选中的指标 Tab
 #[derive(Clone, Copy, PartialEq)]
-pub enum ActiveIndicator {
-    Sma,
-    Ema,
-    Rsi,
-    Macd,
-    Bollinger,
-}
+pub enum ActiveIndicator { Sma, Ema, Rsi, Macd, Bollinger }
 
 pub struct IndicatorPanel {
     pub active: ActiveIndicator,
-    /// 指标参数（可在 UI 调整）
-    pub sma_period: usize,
-    pub ema_period: usize,
-    pub rsi_period: usize,
-    pub macd_fast: usize,
-    pub macd_slow: usize,
-    pub macd_signal: usize,
-    pub bb_period: usize,
-    pub bb_std_dev: f64,
+    // 指标参数（Input 输入，变更时校验后重算）
+    pub sma_period: usize,  pub ema_period: usize,  pub rsi_period: usize,
+    pub macd_fast: usize,   pub macd_slow: usize,   pub macd_signal: usize,
+    pub bb_period: usize,   pub bb_std_dev: f64,
 }
+```
 
-impl IndicatorPanel {
-    pub fn ui(&mut self, ui: &mut Ui, state: &mut AppState) {
-        // Tab 切换栏
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.active, ActiveIndicator::Sma, "SMA");
-            ui.selectable_value(&mut self.active, ActiveIndicator::Ema, "EMA");
-            ui.selectable_value(&mut self.active, ActiveIndicator::Rsi, "RSI");
-            ui.selectable_value(&mut self.active, ActiveIndicator::Macd, "MACD");
-            ui.selectable_value(&mut self.active, ActiveIndicator::Bollinger, "BB");
+曲线绘制（LineChart + chart 色板）：
 
-            ui.separator();
+| 指标 | 曲线 | 色板 |
+|------|------|------|
+| SMA / EMA | 单线 | `chart_1` / `chart_2` |
+| RSI | 单线（70/30 参考线经 Plot 层叠加） | `chart_3` |
+| MACD | DIF/DEA 双线 + 柱（柱用 BarChart） | `chart_4` / `chart_5` |
+| BB | 上/中/下三线 | `chart_1..3` |
 
-            // 当前指标参数调整
-            match self.active {
-                ActiveIndicator::Sma => {
-                    ui.add(egui::Slider::new(&mut self.sma_period, 5..=200).text("Period"));
-                }
-                ActiveIndicator::Ema => {
-                    ui.add(egui::Slider::new(&mut self.ema_period, 5..=200).text("Period"));
-                }
-                ActiveIndicator::Rsi => {
-                    ui.add(egui::Slider::new(&mut self.rsi_period, 5..=50).text("Period"));
-                }
-                ActiveIndicator::Macd => {
-                    ui.label("Fast/Slow/Signal:");
-                    ui.add(egui::DragValue::new(&mut self.macd_fast).range(2..=50));
-                    ui.add(egui::DragValue::new(&mut self.macd_slow).range(2..=100));
-                    ui.add(egui::DragValue::new(&mut self.macd_signal).range(2..=50));
-                }
-                ActiveIndicator::Bollinger => {
-                    ui.add(egui::Slider::new(&mut self.bb_period, 5..=50).text("Period"));
-                    ui.add(egui::Slider::new(&mut self.bb_std_dev, 1.0..=3.0).text("StdDev"));
-                }
-            }
-        });
-
-        ui.separator();
-
-        // 指标图表区域
-        if let Some(values) = &state.indicator_values {
-            self.draw_indicator_chart(ui, values);
-        }
-    }
-
-    /// 使用 egui_plot 绘制指标折线
-    fn draw_indicator_chart(&self, ui: &mut Ui, values: &IndicatorValues) {
-        match self.active {
-            ActiveIndicator::Sma | ActiveIndicator::Ema => {
-                // 单线指标：收盘价 + 指标线
-                if let Some(ref line_data) = values.sma.as_ref().or(values.ema.as_ref()) {
-                    let points: PlotPoints = line_data
-                        .iter()
-                        .enumerate()
-                        .map(|(i, &v)| [i as f64, v])
-                        .collect();
-                    Plot::new("indicator_plot")
-                        .show(ui, |plot_ui| {
-                            plot_ui.line(Line::new(points).name("MA").color(Color32::from_rgb(255, 193, 7)));
-                        });
-                }
-            }
-            ActiveIndicator::Rsi => {
-                // RSI：带超买/超卖参考线
-                if let Some(ref rsi_data) = values.rsi {
-                    let points: PlotPoints = rsi_data
-                        .iter()
-                        .enumerate()
-                        .map(|(i, &v)| [i as f64, v])
-                        .collect();
-                    Plot::new("indicator_plot")
-                        .include_y(0.0)
-                        .include_y(100.0)
-                        .show(ui, |plot_ui| {
-                            plot_ui.line(Line::new(points).name("RSI").color(Color32::from_rgb(156, 39, 176)));
-                            // 超买/超卖水平线
-                            plot_ui.hline(egui_plot::HLineImg::new(70.0).name("Overbought"));
-                            plot_ui.hline(egui_plot::HLineImg::new(30.0).name("Oversold"));
-                        });
-                }
-            }
-            ActiveIndicator::Macd => {
-                // MACD：DIF/DEA/柱状图三线
-                // ... 类似实现
-            }
-            ActiveIndicator::Bollinger => {
-                // 布林带：upper/middle/lower 三线
-                // ... 类似实现
-            }
-        }
-    }
-}
+```rust
+// 指标切换：Select 组件（或 Button 组），选中后 cx.notify() 重绘曲线区
+// 参数调整：Input + 数值校验（validate），订阅模式同 §3.4 搜索框：
+//   InputEvent::Change → 解析数值（非法标红不生效）→ 写入参数
+//   → state.update 触发 recompute_indicators() → cx.notify()
 ```
 
 ### 设计要点
 
-- `selectable_value` 实现 Tab 切换，比手动判断更简洁
-- 参数通过 `Slider` / `DragValue` 实时调整，修改后自动触发重新计算
-- `egui_plot` 的 `Plot::show()` 提供自动坐标轴、缩放、平移
-- RSI 指标需绘制 70/30 参考线，使用 `hline` 绘制水平线
+- 指标计算仍调用指标层（Phase 2）的 `Indicator` 实现，UI 面板只负责"参数 → 曲线"映射
+- 参数变更统一走 `AppState.recompute_indicators()`，避免面板各自持有计算副本
 
 ---
 
 ## 3.7 工具栏与状态栏
 
-### 工具栏
-
 ```rust
-impl QuantApp {
-    fn toolbar_ui(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            // 交易对下拉选择
-            ui.label("交易对:");
-            egui::ComboBox::from_id_salt("symbol_select")
-                .selected_text(&self.state.selected_symbol)
-                .show_ui(ui, |ui| {
-                    for symbol in &self.state.available_symbols {
-                        ui.selectable_value(
-                            &mut self.state.selected_symbol,
-                            symbol.clone(),
-                            symbol,
-                        );
-                    }
-                });
-
-            ui.separator();
-
-            // K 线周期切换按钮组
-            ui.label("周期:");
-            for interval in [Interval::M1, Interval::M5, Interval::M15,
-                             Interval::H1, Interval::H4, Interval::D1] {
-                let label = interval.as_str();
-                let is_selected = self.state.current_interval == interval;
-                if ui.selectable_label(is_selected, label).clicked() {
-                    self.state.current_interval = interval;
-                    self.state.load_kline_data();
-                }
-            }
-        });
-    }
+// 工具栏：交易对选择 + 周期切换（h_flex 单行布局）
+fn render_toolbar(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    let state = self.state.read(cx);
+    h_flex().px_3().py_2().gap_3().items_center()
+        .border_b_1().border_color(cx.theme().border)
+        // 交易对选择：Select/Combobox 组件，on_change 回调（cx.listener）写入 AppState 并广播事件
+        .child(/* Select：选项 = state.available_symbols，当前 = selected_symbol */)
+        // K 线周期切换：Button 组，选中项高亮 primary 色
+        .children([Interval::M1, Interval::M5, Interval::M15,
+                   Interval::H1, Interval::H4, Interval::D1].map(|iv| {
+            // Button::new(iv.as_str()).label(iv.as_str())
+            //     .when(state.current_interval == iv, 高亮样式)
+            //     .on_click(cx.listener(...)) → 切换周期 + 触发数据加载
+        }))
 }
-```
 
-### 状态栏
-
-```rust
-impl QuantApp {
-    fn status_bar_ui(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            // 连接状态指示灯
-            let (dot_color, status_text) = if self.state.is_connected {
-                (Color32::from_rgb(0, 200, 83), "已连接")
-            } else {
-                (Color32::from_rgb(234, 57, 67), "未连接")
-            };
-            ui.add(egui::Label::new(
-                egui::RichText::new("●").color(dot_color)
-            ));
-            ui.label(status_text);
-
-            ui.separator();
-
-            // 最新价格
-            if let Some(ticker) = &self.state.latest_ticker {
-                ui.label(format!("{}: {:.2}", ticker.symbol, ticker.price));
-            }
-
-            ui.separator();
-
-            // 最后更新时间
-            if let Some(ts) = self.state.last_update_time {
-                let time_str = chrono::DateTime::from_timestamp_millis(ts)
-                    .map(|dt| dt.format("%H:%M:%S").to_string())
-                    .unwrap_or_default();
-                ui.label(format!("更新: {}", time_str));
-            }
-
-            ui.separator();
-
-            // 数据条数
-            ui.label(format!("K 线: {} 条", self.state.current_klines.len()));
-        });
-    }
+// 状态栏：连接状态（Badge）+ 最后更新时间 + 数据条数（h_flex 单行布局）
+fn render_status_bar(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    let state = self.state.read(cx);
+    let last_update = state.last_update_time
+        .and_then(chrono::DateTime::from_timestamp_millis)
+        .map(|dt| dt.format("%H:%M:%S").to_string()).unwrap_or_default();
+    h_flex().px_3().py_1().gap_4().items_center()
+        .border_t_1().border_color(cx.theme().border)
+        .child(/* Badge：绿=已连接 / 红=未连接，色取 success/danger */)
+        .child(format!("BTCUSDT: {:.2}", /* latest_ticker 价格 */))
+        .child(format!("更新: {}", last_update))
+        .child(format!("K 线: {} 条", state.current_klines.len()))
 }
 ```
 
 ### 设计要点
 
-- `ComboBox` 用于交易对选择，`selectable_label` 用于周期切换按钮组
-- 状态栏连接状态用颜色圆点指示（绿=已连接，红=未连接）
-- 时间使用 `chrono` 格式化，毫秒时间戳→`HH:MM:SS`
+- Badge / Select / Button 的具体构造参数见官方文档对应组件页；时间格式化复用 `chrono`
 
 ---
 
 ## 3.8 应用状态管理
 
-### AppState 结构体
+### AppState 作为 Entity
 
 ```rust
-// src/ui/app.rs
-use std::sync::Arc;
-use tokio::sync::Mutex;
+// src/ui/app_state.rs
+use gpui_kit::*;
+use quant_data::common::models::{Kline, Ticker, Interval, IndicatorValues};
 
-/// 集中管理所有 UI 状态
+/// AppState 变化事件（面板间通信载体）
+#[derive(Clone)]
+pub enum AppStateChanged { SymbolSelected(SharedString), IntervalChanged(Interval) }
+
+/// 集中管理所有 UI 状态（作为 Entity 被各面板 observe/subscribe）
 pub struct AppState {
     // === 交易对与周期 ===
-    pub selected_symbol: String,
+    pub selected_symbol: SharedString,
     pub current_interval: Interval,
-    pub available_symbols: Vec<String>,
-
-    // === K 线数据 ===
+    pub available_symbols: Vec<SharedString>,
+    // === K 线与指标 ===
     pub current_klines: Vec<Kline>,
-
-    // === 指标数据 ===
     pub indicator_values: Option<IndicatorValues>,
-
     // === 实时数据（Phase 4 填充）===
     pub latest_ticker: Option<Ticker>,
     pub is_connected: bool,
     pub last_update_time: Option<i64>,
-
-    // === egui 输入（用于获取滚轮等事件）===
-    raw_input: egui::RawInput,
-
-    // === 数据层引用（Phase 4 添加 channel receiver）===
-    // ticker_rx: Option<mpsc::UnboundedReceiver<Ticker>>,
 }
+impl EventEmitter<AppStateChanged> for AppState {}
 
 impl AppState {
-    pub fn new() -> Self {
-        Self {
-            selected_symbol: "BTCUSDT".to_string(),
-            current_interval: Interval::M15,
-            available_symbols: vec![
-                "BTCUSDT".into(), "ETHUSDT".into(), "BNBUSDT".into(),
-                "SOLUSDT".into(), "XRPUSDT".into(), "DOGEUSDT".into(),
-            ],
-            current_klines: Vec::new(),
-            indicator_values: None,
-            latest_ticker: None,
-            is_connected: false,
-            last_update_time: None,
-            raw_input: egui::RawInput::default(),
-        }
-    }
+    pub fn new() -> Self { /* 默认 BTCUSDT / M15，品种列表初始硬编码 */ }
 
-    /// 加载当前交易对和周期的 K 线数据
-    pub fn load_kline_data(&mut self) {
-        // Phase 3: 同步从 KlineStore 加载
-        // Phase 4: 异步加载，通过 channel 接收
-        self.current_klines = Vec::new(); // placeholder
+    /// 加载当前交易对和周期的 K 线数据（从 KlineStore）
+    pub fn load_kline_data(&mut self, cx: &mut Context<Self>) {
+        // Phase 3: 同步加载；Phase 4: 实时增量经 mpsc → cx.spawn 消费循环（tech/04 §4.6）
         self.recompute_indicators();
+        cx.notify();   // 忘记这行 = UI 不更新
     }
-
-    /// 重新计算指标
-    pub fn recompute_indicators(&mut self) {
-        if self.current_klines.is_empty() {
-            self.indicator_values = None;
-            return;
-        }
-        let closes: Vec<f64> = self.current_klines.iter().map(|k| k.close).collect();
-        // 调用 indicators 层计算各指标...
-        self.indicator_values = Some(IndicatorValues {
-            closes,
-            sma: None,   // 实际计算填充
-            ema: None,
-            rsi: None,
-            macd: None,
-            bollinger: None,
-        });
-    }
+    /// 重新计算指标（调用指标层，逻辑与原方案一致）
+    pub fn recompute_indicators(&mut self) { /* ... */ }
 }
 ```
 
-### 状态更新流程
+### 面板间通信：observe / subscribe
+
+```rust
+// 各面板在 new 时建立与 AppState 的连接（以 ChartPanel 为例）
+// 方式 1：observe——AppState 任何 notify 都触发本面板重渲染（粗粒度）
+cx.observe(&state, |_this, _state, cx| cx.notify()).detach();
+
+// 方式 2：subscribe_in——只响应关注的事件（细粒度，面板间通信标准模式）
+cx.subscribe_in(&state, window, |this, _state, event, _window, cx| {
+    match event {
+        AppStateChanged::SymbolSelected(symbol) => {
+            this.reload_candles(symbol);   // 选中品种变化 → 图表刷新
+            cx.notify();
+        }
+        AppStateChanged::IntervalChanged(_) => { /* 同上 */ }
+    }
+}).detach();   // Subscription 需 detach，随宿主 Entity 释放自动清理
+
+// 事件发送端（如品种列表点击后）：
+state.update(cx, |s, cx| {
+    s.selected_symbol = symbol.into();
+    s.load_kline_data();
+    cx.emit(AppStateChanged::SymbolSelected(symbol.into())); // 广播给订阅者
+    cx.notify();                                             // AppState 自身重渲染
+});
+```
+
+### Entity 树与状态更新流程
 
 ```
-用户操作（切换交易对/周期）
-      │
-      ▼
-AppState.load_kline_data()
-      │
-      ▼
-KlineStore.get(symbol, interval) ──▶ Vec<Kline>
-      │
-      ▼
-AppState.recompute_indicators()
-      │
-      ▼
-Indicator.compute(closes) ──▶ IndicatorValues
-      │
-      ▼
-egui 下一帧 update() 自动重绘
+QuantApp (root) ─ Entity<AppState>（共享状态）＋ Entity<WatchlistPanel / ChartPanel / IndicatorPanel>
+                  （面板均 observe / subscribe AppState，互不直接引用）
+```
+
+```
+用户操作 → cx.listener → state.update → load_kline_data() → KlineStore.get()
+    → recompute_indicators() → cx.emit(AppStateChanged) + cx.notify()
+    → 订阅面板回调刷新自身 → GPUI 按需重渲染（只重绘受影响视图）
 ```
 
 ### 设计要点
 
-- `AppState` 集中管理所有 UI 状态，避免状态分散在多个结构体中
-- `load_kline_data()` 触发数据加载 → 指标重算 → 自动重绘（即时模式无需手动刷新）
-- Phase 4 添加 `ticker_rx` channel receiver，在 `update()` 中 `try_recv()` 消费实时数据
+- **状态变更三步**：改字段 → `cx.emit(...)`（可选，通知他人）→ `cx.notify()`（驱动重渲染）
 - `available_symbols` 初始硬编码，后续可从 `GET /api/v3/exchangeInfo` 动态获取
 
 ---
 
 ## 3.9 设计要点
 
-### egui 即时模式的心智模型
+### gpui 心智模型：notify 驱动按需重渲染
 
-- **每帧重绘**：`update()` 每秒调用 30-60 次，所有 UI 元素在每次调用中重新构建
-- **无 UI 树**：不像 React/HTML 有持久 DOM，egui 的 widget 是临时创建的
-- **状态持久化**：widget 状态通过 `Id` 系统自动持久化（如 `ScrollArea` 的滚动位置）
-- **响应式更新**：无需手动触发刷新，修改 `AppState` 后下一帧自动反映
+| 维度 | egui（即时模式） | gpui（保留模式） |
+|------|-----------------|-----------------|
+| 渲染时机 | `update()` 每帧调用（30-60 FPS） | `render()` 仅在 Entity 被 notify / 输入事件后执行 |
+| UI 树 / 状态 | 每帧重建、widget 状态靠 `Id` 存储 | Entity 树持久存在，状态就是 Entity 字段 |
+| 刷新触发 | 改状态后下一帧自动反映 | 必须显式 `cx.notify()`，否则 UI 不更新 |
 
-### 性能考虑
+### cx.notify() 纪律（最常见 bug）
 
-| 场景 | 优化策略 |
-|------|---------|
-| 大数据集 K 线渲染 | 只绘制可视范围内的蜡烛（viewport culling） |
-| 指标计算 | 数据量大时在后台线程计算，避免阻塞 UI 线程 |
-| 实时数据更新 | `try_recv()` 非阻塞消费，避免 UI 卡顿 |
-| 字体加载 | 启动时一次性加载，使用 `include_bytes!` 编译嵌入 |
+- 忘记调用 = 数据变了但界面不动，**没有任何报错**；建议写在状态更新方法的最后一行形成肌肉记忆
 
-### ctx.request_repaint() 的使用场景
+### Task 句柄存字段（防 drop 取消）
 
-- 收到 WebSocket 实时数据时，调用 `ctx.request_repaint()` 唤醒 UI 线程重绘
-- 异步数据加载完成时，通知 UI 刷新
-- 默认情况下 egui 在用户交互（鼠标移动/键盘）时自动重绘，静态时无需重绘
-- `request_repaint()` 打破"空闲不重绘"行为，确保实时数据及时显示
+- `cx.spawn` 返回的 `Task` 被 drop 时任务即被取消；长期运行的前台任务（如 Phase 4 通道消费循环）
+  必须存入字段 `_recv_task: Task<()>`（下划线前缀表达"仅持有防取消"）
+
+### 中文字体：系统字体直用
+
+- Windows 上经 DirectWrite 使用系统 UI 字体，默认 `.SystemUIFont`（中文 Windows 即微软雅黑），
+  **无需**加载字体文件——egui 时代的 `setup_fonts` / `include_bytes!` 代码全部删除
+
+### 官方文档
+
+- gpui-kit 文档：<https://gpui-kit.com>（含中文 zh-CN）；Select / Button / Badge / Dock / Plot 的
+  构造参数以文档为准，本文档骨架保证核心交互模式（Entity / notify / listener / subscribe）准确

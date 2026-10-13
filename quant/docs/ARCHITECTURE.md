@@ -15,7 +15,7 @@
 采用 **分层架构 + 事件驱动** 混合模式：
 
 - **分层架构**：上层依赖下层，下层不感知上层（单向依赖）
-- **事件驱动**：实时行情通过 channel 推送，UI 通过 repaint 机制响应
+- **事件驱动**：实时行情通过 channel 推送，UI 通过 `cx.notify()` 机制响应
 
 ---
 
@@ -33,7 +33,7 @@
 │        WebSocket 客户端、行情推送、实时数据缓存       │
 ├─────────────────────────────────────────────────────┤
 │                   界面层 (ui)                        │
-│        egui 桌面界面、K 线图、指标图表、控制面板      │
+│        gpui 桌面界面、K 线图、指标图表、控制面板      │
 ├─────────────────────────────────────────────────────┤
 │                   计算层 (indicators)                │
 │        SMA/EMA/RSI/MACD/布林带、Trait 抽象          │
@@ -53,7 +53,7 @@
 | **公共层** | `common` | 错误类型定义、全局配置、数据模型 (Kline/Ticker)、工具函数 | thiserror, chrono |
 | **数据层** | `data` | Binance REST API 调用、K 线数据获取与缓存、数据格式化 | reqwest, serde, polars |
 | **计算层** | `indicators` | 技术指标计算（SMA/EMA/RSI/MACD/Bollinger）、Indicator trait 抽象 | — (纯计算) |
-| **界面层** | `ui` | egui 桌面界面、K 线图渲染、指标叠加、交易对选择、时间框架切换 | eframe, egui_plot |
+| **界面层** | `ui` | gpui 桌面界面、K 线图渲染（CandlestickChart）、指标叠加、交易对选择、时间框架切换 | gpui-kit (gpui-pre) |
 | **实时层** | `realtime` | Binance WebSocket 连接管理、实时行情解析、mpsc 推送至 UI | tokio-tungstenite, futures-util |
 | **回测层** | `backtest` | 向量化回测引擎、历史数据加载、收益/回撤/夏普比率计算 | polars |
 | **策略层** | `strategy` | Strategy trait 定义、内置策略（均线交叉、RSI 超买超卖）、信号生成 | — |
@@ -121,9 +121,9 @@ quant/
 | `data/types.rs` | Binance API JSON 响应的 serde 反序列化类型 | data | Phase 1 |
 | `indicators/mod.rs` | `Indicator` trait 定义、指标注册 | indicators | Phase 2 |
 | `indicators/sma.rs` ~ `bollinger.rs` | 各指标实现 | indicators | Phase 2 |
-| `ui/app.rs` | `QuantApp` 主状态、`eframe::App` 实现 | ui | Phase 3 |
-| `ui/chart.rs` | K 线 Candlestick 渲染 (Shape API) | ui | Phase 3 |
-| `ui/indicator_panel.rs` | 指标曲线叠加 (egui_plot) | ui | Phase 3 |
+| `ui/app.rs` | `QuantApp` 主状态、`Render` trait 实现、Dock 多面板布局 | ui | Phase 3 |
+| `ui/chart.rs` | K 线 Candlestick 渲染 (gpui-kit CandlestickChart) | ui | Phase 3 |
+| `ui/indicator_panel.rs` | 指标曲线叠加 (gpui-kit LineChart) | ui | Phase 3 |
 | `ui/control_panel.rs` | 交易对选择、时间框架、指标开关 | ui | Phase 3 |
 | `realtime/ws_client.rs` | WebSocket 连接、自动重连、消息流 | realtime | Phase 4 |
 | `realtime/service.rs` | 解析 Binance WS 消息、转换为 Ticker | realtime | Phase 4 |
@@ -160,7 +160,7 @@ Binance REST API
        │ Vec<f64>
        ▼
 ┌──────────────┐
-│  UI (egui)   │  K 线图 + 指标曲线渲染
+│  UI (gpui)   │  K 线图 + 指标曲线渲染
 └──────────────┘
 ```
 
@@ -177,8 +177,8 @@ Binance WebSocket (wss://stream.binance.com:9443)
        │ mpsc::Sender<Ticker>
        ▼
 ┌──────────────┐
-│  UI (egui)   │  ctx.request_repaint() 触发重绘
-│  接收 rx     │  读取最新 Ticker 更新状态
+│  UI (gpui)   │  cx.spawn 消费 rx + cx.notify() 触发重渲染
+│  前台任务    │  更新最新 Ticker 状态
 └──────────────┘
 ```
 
@@ -209,55 +209,80 @@ Binance WebSocket (wss://stream.binance.com:9443)
 
 ## 5. 异步模型
 
-### 5.1 tokio runtime 配置
+### 5.1 应用启动与 runtime 分工
 
 ```rust
-#[tokio::main]
-async fn main() -> eframe::Result {
+fn main() {
     // 初始化 tracing
     tracing_subscriber::fmt::init();
 
-    // eframe 启动（内部运行 tokio runtime）
-    let options = eframe::NativeOptions::default();
-    eframe::run_native("RustQuant", options, Box::new(|cc| Ok(Box::new(QuantApp::new(cc)))))
+    // gpui 启动三段式：application() → init() → open_window()
+    // GPUI 主循环（GPU 渲染）运行在主线程；tokio runtime 由 quant-data 侧管理 WS/HTTP 任务
+    gpui_kit::application().with_assets(Assets).run(|cx| {
+        gpui_kit::init(cx);
+        gpui_kit::open_window(WindowOptions::default(), cx, |_, cx| {
+            cx.new(|_| QuantApp::new())
+        }).expect("Failed to open window");
+    });
 }
 ```
 
 ### 5.2 任务拓扑
 
-| tokio task | 职责 | 通信方式 |
-|------------|------|---------|
-| **主线程** | egui UI 渲染、用户交互 | — |
-| **ws_receiver** | 接收 WebSocket 消息，解析为 `Ticker` | `mpsc::Sender<Ticker>` → UI |
-| **data_fetch** (按需) | 异步加载历史 K 线数据 | `oneshot::Sender<Vec<Kline>>` → UI |
+| task | 职责 | 通信方式 |
+|------|------|---------|
+| **GPUI 主线程** | gpui UI 渲染、用户交互 | `cx.notify()` 触发重渲染 |
+| **ws_receiver** (tokio task) | 接收 WebSocket 消息，解析为 `Ticker` | `mpsc::Sender<Ticker>` → GPUI 前台任务 |
+| **data_fetch** (tokio task, 按需) | 异步加载历史 K 线数据 | `oneshot::Sender<Vec<Kline>>` → UI |
 
-### 5.3 与 egui 的集成模式
+### 5.3 与 gpui 的集成模式
 
-egui 是即时模式 GUI，运行在主线程。异步任务通过 channel 将数据传递给 UI：
+gpui 是保留模式 GUI，GPUI 主循环运行在主线程。tokio 侧 IO 任务通过 mpsc 将解析后的行情传给 GPUI 前台任务；mpsc 的 `recv()` 是同步原语、不依赖 tokio reactor，可在 GPUI 前台安全 `await`：
 
 ```rust
-// UI 侧：持有 receiver
+use gpui_kit::*; // 重导出全部 GPUI API（div、Window、Context、Entity、Task...）
+
+// UI 侧：持有 receiver 与 Task 句柄
 struct QuantApp {
     rx: mpsc::UnboundedReceiver<Ticker>,
     latest_ticker: Option<Ticker>,
-    ctx: egui::Context,  // 用于 request_repaint
+    _recv_task: Task, // Task 句柄存字段，防止 drop 即取消
 }
 
-// 在 update() 中消费消息
-fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-    // 非阻塞读取所有待处理消息
-    while let Ok(ticker) = self.rx.try_recv() {
-        self.latest_ticker = Some(ticker);
+impl QuantApp {
+    pub fn new(mut rx: mpsc::UnboundedReceiver<Ticker>, cx: &mut Context<Self>) -> Self {
+        // GPUI 前台任务循环消费 tokio mpsc，收到行情后更新状态并触发重渲染
+        let _recv_task = cx.spawn(async move |this, cx| {
+            while let Some(ticker) = rx.recv().await {
+                this.update(&mut cx, |this, cx| {
+                    this.latest_ticker = Some(ticker);
+                    cx.notify(); // 状态变更后必须 notify 才会重渲染
+                })
+                .ok();
+            }
+        });
+        Self { rx, latest_ticker: None, _recv_task }
     }
-    // 渲染 K 线图...
+}
+
+impl Render for QuantApp {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // v_flex()/h_flex() 布局 + Tailwind 风格链式调用，渲染 K 线图...
+    }
 }
 ```
+
+**tokio 桥接三陷阱**：
+
+1. GPUI 前台 Future 里不能创建 tokio timer（依赖 tokio reactor，会 panic）
+2. `cx.background_spawn` 不能直接轮询依赖 tokio 的 Future
+3. UI 测试不得依赖 tokio worker 时序
 
 ### 5.4 优雅关闭策略
 
 - WebSocket 客户端持有 `CancellationToken`（tokio-util），UI 关闭时触发 cancel
 - `ws_receiver` task 检测到 cancel 后主动关闭连接并退出
-- 主线程等待所有 task join 后退出
+- GPUI 前台任务句柄存于 struct 字段（如 `_recv_task`）防止 drop 即取消；窗口关闭 → GPUI 主循环退出 → tokio 任务随 CancellationToken 收尾
 
 ---
 
@@ -399,7 +424,7 @@ Ticker ──┘ (实时更新)
 |------|---------|---------|-----------|
 | **Phase 1** | common, data | tokio, reqwest, serde, chrono, polars, anyhow, thiserror, tracing | 2 |
 | **Phase 2** | indicators | — (复用 thiserror) | 3 |
-| **Phase 3** | ui | eframe, egui_plot | 4 |
+| **Phase 3** | ui | gpui-kit (含 gpui-pre) | 4 |
 | **Phase 4** | realtime | tokio-tungstenite, futures-util | 5 |
 | **Phase 5** | backtest | — (复用 polars) | 6 |
 | **Phase 6** | strategy | — (无新依赖) | 7 |
@@ -408,7 +433,7 @@ Ticker ──┘ (实时更新)
 
 - **Phase 1** — async/await + reqwest + serde 实战
 - **Phase 2** — Trait 抽象 + 泛型 + 迭代器链
-- **Phase 3** — egui 即时模式 GUI + 状态管理
+- **Phase 3** — gpui 保留模式 GUI（Entity/Render/notify）+ 状态管理
 - **Phase 4** — WebSocket + mpsc channel + 并发 task
 - **Phase 5** — polars 数据处理 + 文件 I/O + 统计计算
 - **Phase 6** — 设计模式 (Strategy) + 完整系统集成

@@ -30,7 +30,7 @@ csv = "1"                  # CSV 导出（回测报告、K 线数据导出）
 |------|-----------|
 | Phase 1 数据层 | K 线数据获取与缓存 |
 | Phase 2 指标层 | 技术指标计算（SMA/EMA/RSI/MACD/布林带） |
-| Phase 3 界面层 | egui 桌面界面、K 线图渲染 |
+| Phase 3 界面层 | gpui + gpui-kit 桌面界面、K 线图渲染 |
 | Phase 4 实时层 | WebSocket 实时行情推送 |
 | Phase 5 回测层 | 向量化回测引擎、绩效统计 |
 | **Phase 6 策略层** | **策略框架 + 内置策略 + 系统集成 + 报告界面** |
@@ -415,139 +415,179 @@ impl PaperTrader {
 
 ## 6.6 UI 集成（回测报告界面）
 
+回测界面全部使用 gpui-kit 组件：配置面板（Input 货币掩码 + Select 策略选择）、
+收益曲线（LineChart）、统计指标表格与交易记录列表（DataTable，后者虚拟滚动）。
+
 ### 回测配置面板
 
 ```rust
 // ui/backtest_panel.rs
-
-use crate::backtest::report::BacktestConfig;
+use gpui_kit::*;
+use quant_data::common::models::Kline;
+use crate::backtest::report::{BacktestConfig, BacktestReport};
 use crate::strategy::StrategyRegistry;
 
-/// 回测面板状态
+/// 回测面板（gpui Entity，可挂入 Dock 工作区标签页）
 pub struct BacktestPanel {
-    /// 回测配置
-    config: BacktestConfig,
+    /// 回测配置（Input 输入，Change/Enter 时校验回填）
+    pub config: BacktestConfig,
     /// 已选策略名称
-    selected_strategy: String,
-    /// 可用策略列表
-    available_strategies: Vec<String>,
+    pub selected_strategy: SharedString,
+    /// 可用策略列表（来自 StrategyRegistry::available_strategies）
+    pub available_strategies: Vec<SharedString>,
     /// 策略参数（名称 → 值）
-    strategy_params: Vec<(String, f64)>,
+    pub strategy_params: Vec<(String, f64)>,
     /// 是否正在运行回测
-    is_running: bool,
+    pub is_running: bool,
     /// 回测结果
-    result: Option<BacktestReport>,
+    pub result: Option<BacktestReport>,
     /// 错误信息
-    error_msg: Option<String>,
+    pub error_msg: Option<SharedString>,
+    /// 回测结果消费任务句柄（存字段防 drop 取消，模式同 tech/04 §4.6）
+    _result_task: Task<()>,
 }
+```
 
-impl BacktestPanel {
-    pub fn ui(&mut self, ui: &mut egui::Ui) {
-        // 策略选择下拉框
-        egui::ComboBox::from_label("策略")
-            .selected_text(&self.selected_strategy)
-            .show_ui(ui, |ui| {
-                for name in &self.available_strategies {
-                    ui.selectable_value(&mut self.selected_strategy, name.clone(), name);
-                }
-            });
+输入控件（货币掩码 + 策略选择）：
 
-        // 参数设置
-        ui.horizontal(|ui| {
-            ui.label("初始资金:");
-            ui.add(egui::DragValue::new(&mut self.config.initial_capital)
-                .range(100.0..=1_000_000.0));
-        });
-        ui.horizontal(|ui| {
-            ui.label("手续费率:");
-            ui.add(egui::DragValue::new(&mut self.config.commission_rate)
-                .range(0.0..=0.01)
-                .speed(0.0001));
-        });
+```rust
+// 初始资金输入：Input 货币掩码（千分位分隔 + 2 位小数）
+let capital_input = cx.new(|cx| {
+    InputState::new(window, cx)
+        .placeholder("10000")
+        // 货币掩码：MaskPattern::Number { separator: Some(','), fraction: Some(2) }
+});
 
-        // 运行按钮
-        if ui.add_enabled(!self.is_running, egui::Button::new("运行回测")).clicked() {
-            self.is_running = true;
-            // 触发回测（通过 channel 通知主逻辑）
+// 事件订阅：Change/Enter 时解析并回填 config（validate 失败标红不生效）
+cx.subscribe_in(&capital_input, window, |this, input, event, _window, cx| {
+    match event {
+        InputEvent::Change | InputEvent::PressEnter { .. } => {
+            // 解析输入文本 → f64 → this.config.initial_capital
+            cx.notify();
         }
     }
+})
+.detach();
+
+// 策略选择：Select 组件，选项来自 StrategyRegistry（构造参数见官方文档 Select 页）
+// on_change 回调（cx.listener）写入 selected_strategy，并重载该策略 default_params()
+
+// 手续费率输入：同款 Input 掩码（fraction: Some(4)），范围校验 [0, 0.01]
+// 「运行回测」按钮：Button 组件，is_running 时禁用
+```
+
+### 回测执行（不阻塞 UI）
+
+回测是 CPU 密集任务，用 `cx.background_spawn` 派发到后台线程，结果经 mpsc 送回前台
+（消费模式与 tech/04 §4.6 一致）：
+
+```rust
+impl BacktestPanel {
+    /// 点击「运行回测」（cx.listener 回调）
+    fn run_backtest(
+        &mut self,
+        klines: Vec<Kline>,
+        result_tx: mpsc::UnboundedSender<BacktestReport>,
+        _window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.is_running = true;
+        cx.notify();
+
+        // CPU 密集：background_spawn 后台线程执行回测，避免阻塞 UI 渲染
+        // 引擎内部：BacktestEngine + Strategy + Indicator 全部在回测/策略层
+        // 完成后 result_tx.send(report)；错误经另一条通道送 error_msg
+    }
 }
+
+// 前台消费任务（BacktestPanel::new 中启动，句柄存入 _result_task）：
+// while let Some(report) = result_rx.recv().await {
+//     panel_weak.update(&mut cx, |panel, cx| {
+//         panel.result = Some(report);
+//         panel.is_running = false;
+//         cx.notify();                     // 必须 notify 才重渲染
+//     }).ok();
+// }
 ```
 
 ### 回测结果展示
 
 ```rust
-// ui/backtest_panel.rs（结果展示部分）
+// 收益曲线：LineChart（CandlestickChart 同系列组件，访问器闭包模式相同）
+// equity_curve: Vec<(u64, f64)>（时间戳, 净值）→ 图表点
+struct EquityPoint {
+    label: String,    // 时间戳格式化为坐标轴标签
+    equity: f64,
+}
 
-impl BacktestPanel {
-    fn show_result(&self, ui: &mut egui::Ui) {
-        let report = match &self.result {
-            Some(r) => r,
-            None => return,
-        };
+LineChart::new(equity_points)
+    .x(|p| p.label.clone())
+    .y(|p| p.equity)
+    .color(cx.theme().chart_1)      // 曲线色板见 tech/03 §3.6
 
-        // 收益曲线（egui_plot 折线图）
-        egui_plot::Plot::new("equity_curve")
-            .height(200.0)
-            .show(ui, |plot_ui| {
-                let points: Vec<[f64; 2]> = report.result.equity_curve.iter()
-                    .enumerate()
-                    .map(|(i, (_, equity))| [i as f64, *equity])
-                    .collect();
-                plot_ui.line(egui_plot::Line::new(
-                    egui_plot::PlotPoints::from(points)
-                ).name("权益曲线"));
-            });
+// 统计指标表格：DataTable（BacktestReport::summary() 返回 8 项「指标-值」对）
+struct StatsDelegate {
+    rows: Vec<(String, String)>,    // 来自 report.summary()
+}
+// impl TableDelegate for StatsDelegate：2 列固定行数，无需虚拟滚动
 
-        // 统计指标表格（egui Grid）
-        egui::Grid::new("stats_grid")
-            .striped(true)
-            .show(ui, |ui| {
-                for (label, value) in report.summary() {
-                    ui.label(label);
-                    ui.label(value);
-                    ui.end_row();
-                }
-            });
+// 交易记录列表：DataTable 虚拟滚动（万笔交易只渲染可见行）
+struct TradesDelegate {
+    trades: Vec<TradeRecord>,       // 来自 report.result.trades
+}
 
-        // 交易记录列表（egui_extras TableBuilder）
-        egui_extras::TableBuilder::new(ui)
-            .column(egui_extras::Column::auto())
-            .column(egui_extras::Column::auto())
-            .column(egui_extras::Column::auto())
-            .column(egui_extras::Column::auto())
-            .header(20.0, |mut header| {
-                for col in &["#", "方向", "入场价", "盈亏"] {
-                    header.col(|ui| { ui.label(*col); });
-                }
-            })
-            .body(|mut body| {
-                for trade in &report.result.trades {
-                    body.row(18.0, |mut row| {
-                        row.col(|ui| { ui.label(trade.trade_id.to_string()); });
-                        row.col(|ui| { ui.label(format!("{:?}", trade.side)); });
-                        row.col(|ui| { ui.label(format!("{:.2}", trade.entry_price)); });
-                        row.col(|ui| {
-                            let color = if trade.pnl > 0.0 {
-                                egui::Color32::from_rgb(0, 200, 0)
-                            } else {
-                                egui::Color32::from_rgb(200, 0, 0)
-                            };
-                            ui.colored_label(color, format!("{:.2}", trade.pnl));
-                        });
-                    });
-                }
-            });
+impl TableDelegate for TradesDelegate {
+    fn columns_count(&self, _: &App) -> usize { 5 }
+
+    fn rows_count(&self, _: &App) -> usize { self.trades.len() }
+
+    fn column(&self, col_ix: usize, _: &App) -> Column {
+        match col_ix {
+            0 => Column::new("id", "#").sortable(),
+            1 => Column::new("side", "方向").sortable(),
+            2 => Column::new("entry", "入场价").text_right().sortable(),
+            3 => Column::new("exit", "出场价").text_right().sortable(),
+            _ => Column::new("pnl", "盈亏").text_right().sortable(),
+        }
+    }
+
+    fn render_td(&mut self, row_ix: usize, col_ix: usize,
+                 _window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let trade = &self.trades[row_ix];
+        match col_ix {
+            0 => trade.trade_id.to_string().into_any_element(),
+            1 => format!("{:?}", trade.side).into_any_element(),
+            2 => format!("{:.2}", trade.entry_price).into_any_element(),
+            3 => format!("{:.2}", trade.exit_price).into_any_element(),
+            // 盈亏颜色：涨绿跌红（主题色）
+            _ => {
+                let color = if trade.pnl >= 0.0 { cx.theme().success } else { cx.theme().danger };
+                div().text_color(color).child(format!("{:+.2}", trade.pnl)).into_any_element()
+            }
+        }
+    }
+
+    fn perform_sort(&mut self, col_ix: usize, sort: ColumnSort, _: &App) {
+        // 按 # / 入场价 / 盈亏 排序（ColumnSort::Ascending / Descending）
     }
 }
+
+// 创建表格状态（Entity<TableState> 持有 delegate；列宽可拖拽）
+let trades_state = cx.new(|cx| {
+    TableState::new(TradesDelegate { trades }, window, cx).col_resizable(true)
+});
+
+// 渲染：虚拟滚动——只对可见行调用 render_td
+DataTable::new(&trades_state).stripe(true).bordered(true)
 ```
 
 ### 设计要点
 
-- 回测面板独立于主界面，通过 `BacktestPanel` 状态管理
-- 收益曲线使用 `egui_plot` 折线图，横轴为 bar 索引，纵轴为净值
-- 统计指标使用 `egui::Grid` 两列布局
-- 交易记录使用 `egui_extras::TableBuilder` 表格，盈亏用颜色区分
+- 回测面板作为独立 Entity 挂入 Dock 工作区标签页，状态自管理（config / result / is_running）
+- 货币输入用 `MaskPattern::Number` 掩码在输入层拦截非法字符，`InputEvent::Change` 时再做数值校验（validate）
+- 收益曲线用 LineChart，横轴为 bar 索引（时间戳做标签），纵轴为净值
+- 统计指标与交易记录均用 DataTable：前者行数固定（8 行），后者虚拟滚动（`render_td` 只渲染可见行）
+- 盈亏颜色取 `cx.theme().success / .danger`，与其他界面涨跌配色一致
 
 ---
 
@@ -605,29 +645,32 @@ pub fn export_report_csv(
 main()
   │
   ├── tracing_subscriber::init()          // 初始化日志
-  ├── 创建 tokio runtime
+  ├── 创建 tokio::runtime::Runtime        // IO 任务运行时（实时层）
   ├── 初始化 StrategyRegistry (内置策略)
   ├── 初始化 KlineStore (数据缓存)
-  ├── eframe::run_native(QuantApp)        // 启动 GUI
-  │     │
-  │     └── QuantApp::new()
+  ├── gpui_kit::application().run(...)    // gpui 启动三段式
+  │     ├── gpui_kit::init(cx)            // 必须在开窗前调用
+  │     └── open_window → QuantApp::new()
+  │           ├── 创建 AppState（Entity，tech/03 §3.8）
   │           ├── 创建 BinanceClient
   │           ├── 创建 IndicatorPipeline
   │           ├── 创建 PaperTrader
-  │           ├── 创建 BacktestPanel
-  │           └── 启动 WebSocket task (可选)
+  │           ├── 创建 BacktestPanel（Entity）
+  │           └── 启动实时层桥接消费循环（cx.spawn，tech/04 §4.6）
   │
-  └── UI 事件循环 (update)
+  └── GPUI 事件循环（notify 驱动按需重渲染）
         ├── 控制面板：交易对/周期选择
         ├── K 线图 + 指标曲线渲染
         ├── 回测面板：策略选择/参数/运行
-        └── 实时行情更新（WebSocket → repaint）
+        └── 实时行情更新（mpsc → cx.spawn 消费 → cx.notify）
 ```
 
 ### main.rs 最终结构
 
 ```rust
 // main.rs
+use gpui_kit::*;
+use gpui_kit::assets::Assets;
 
 // quant-data 模块通过外部 crate 引用
 use quant_data::common;
@@ -640,10 +683,7 @@ mod ui;
 mod backtest;
 mod strategy;
 
-use anyhow::Result;
-
-#[tokio::main]
-async fn main() -> eframe::Result {
+fn main() {
     // 初始化日志
     tracing_subscriber::fmt()
         .with_env_filter("quant_app=info")
@@ -651,23 +691,22 @@ async fn main() -> eframe::Result {
 
     tracing::info!("RustQuant 启动中...");
 
-    // eframe 启动配置
-    let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1200.0, 800.0])
-            .with_title("RustQuant"),
-        ..Default::default()
-    };
+    // 构建独立 tokio runtime（实时层 IO 任务运行于此）
+    // GPUI 主线程不处于 tokio 上下文，tokio 任务须通过 handle.spawn 派发（tech/04 §4.7）
+    let rt = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
 
-    eframe::run_native(
-        "RustQuant",
-        options,
-        Box::new(|cc| {
-            // 加载自定义字体（支持中文）
-            ui::theme::load_chinese_fonts(&cc.egui_ctx);
-            Ok(Box::new(ui::app::QuantApp::new(cc)))
-        }),
-    )
+    // gpui 启动三段式：application → init → open_window
+    gpui_kit::application()
+        .with_assets(Assets)
+        .run(|cx| {
+            gpui_kit::init(cx);             // 必须在开窗前调用
+            gpui_kit::open_window(
+                WindowOptions::default(),   // 标题/尺寸等配置见官方文档
+                cx,
+                |_, cx| cx.new(|_| ui::app::QuantApp::new(rt.handle().clone())),
+            )
+            .expect("Failed to open window");
+        });
 }
 ```
 
@@ -676,36 +715,41 @@ async fn main() -> eframe::Result {
 ```rust
 // ui/app.rs
 
+use gpui_kit::*;
 use quant_data::common::models::{Kline, Interval, Ticker};
 use quant_data::data::fetcher::BinanceClient;
 use quant_data::data::kline_store::KlineStore;
 
-/// QuantApp 使用 AppState 集中管理所有状态（与 tech/03 §3.8 一致）
+/// QuantApp 根视图（Entity）：使用 AppState 集中管理所有状态（与 tech/03 §3.8 一致）
 pub struct QuantApp {
     /// 集中管理的 UI 状态
-    state: AppState,
-    // 子面板
-    watchlist: WatchlistPanel,
-    chart: CandlestickChart,
-    indicator_panel: IndicatorPanel,
+    pub state: Entity<AppState>,
+    // 子面板（Entity 持有，render 时插入 Dock 工作区）
+    pub watchlist: Entity<WatchlistPanel>,
+    pub chart: Entity<ChartPanel>,
+    pub indicator_panel: Entity<IndicatorPanel>,
     // 策略层
     paper_trader: PaperTrader,
     strategy_registry: StrategyRegistry,
-    // UI 面板
-    backtest_panel: BacktestPanel,
-    // 实时层通道
-    kline_rx: mpsc::UnboundedReceiver<WsKline>,
-    ticker_rx: mpsc::UnboundedReceiver<WsTicker>,
+    // 回测面板
+    pub backtest_panel: Entity<BacktestPanel>,
+    // 实时层桥接：通道 receiver 在 new() 中 move 进 cx.spawn 消费循环（tech/04 §4.6）
+    // 此处只保留 Task 句柄（存字段防 drop 取消）
+    _kline_task: Task<()>,
+    _ticker_task: Task<()>,
+    // tokio runtime 句柄（实时层任务派发）
+    rt_handle: tokio::runtime::Handle,
 }
 ```
 
 ### 设计要点
 
-- `main.rs` 保持极简，仅负责初始化和启动
-- `QuantApp` 使用 `state: AppState` 集中管理状态（与 tech/03 §3.8 一致），避免字段平铺
-- 各模块通过 `QuantApp` 的字段持有，在 `update()` 中协调
-- 策略注册表在 `QuantApp::new()` 中初始化，UI 面板从中获取策略列表
-- 中文支持通过 `load_chinese_fonts()` 加载字体文件
+- `main.rs` 保持极简：日志 → tokio runtime → gpui 三段式启动
+- `QuantApp` 根视图持有 `Entity<AppState>` 与各面板 Entity（与 tech/03 §3.8 一致），避免状态字段平铺
+- 跨面板协调走 AppState 的 observe/subscribe 事件；`update()` 每帧协调的 egui 模式不再存在
+- 策略注册表在 `QuantApp::new()` 中初始化，回测面板从中获取策略列表
+- 中文直接使用系统字体（Windows DirectWrite 默认 `.SystemUIFont`），无需加载字体文件
+  （egui 时代的 `load_chinese_fonts()` 已删除，见 tech/03 §3.9）
 
 ---
 

@@ -25,19 +25,20 @@
 ### 与 Phase 3 的衔接
 
 ```
-Phase 3 (ui)                    Phase 4 (realtime)
-┌──────────────┐                ┌──────────────┐
-│  QuantApp    │                │ WsClient     │
-│  AppState    │◀── mpsc ──────│ (tokio task) │
-│  update()    │  try_recv()    │              │
-│  ctx.request │                │ Binance WS   │
-│  _repaint()  │                │ wss://...    │
-└──────────────┘                └──────────────┘
+Phase 3 (ui)                      Phase 4 (realtime)
+┌──────────────┐                  ┌──────────────┐
+│  QuantApp    │                  │ WsClient     │
+│ (GPUI Entity)│◀── mpsc ────────│ (tokio task) │
+│  cx.spawn    │  rx.recv().await │              │
+│  → state.    │                  │ Binance WS   │
+│  update +    │                  │ wss://...    │
+│  cx.notify() │                  └──────────────┘
+└──────────────┘
 ```
 
-- **UI 层**持有 `mpsc::Receiver`，在 `update()` 中 `try_recv()` 消费数据
+- **UI 层**通过 `cx.spawn` 前台任务在 `rx.recv().await` 上挂起等待，收到消息后 `state.update(...)` 更新 Entity 状态并 `cx.notify()`（§4.6）
 - **实时层**后台任务持续接收 WebSocket 消息，通过 `mpsc::Sender` 推送
-- `ctx.request_repaint()` 唤醒 UI 线程，确保实时数据及时显示
+- 收到消息即 `notify`，GPUI 按需重渲染，无需 request_repaint 类的唤醒调用
 
 ---
 
@@ -410,26 +411,24 @@ impl RealtimeChannels {
 
 ### UI 侧消费代码
 
+消费模式从 "eframe `update()` 每帧 poll" 改为 "gpui `cx.spawn` 前台任务挂起等待"：
+
 ```rust
-// 在 QuantApp::update() 中
-fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-    // 非阻塞读取所有待处理 K 线消息
-    while let Ok(ws_kline) = self.kline_rx.try_recv() {
-        if let Some(kline) = ws_kline.to_kline() {
-            self.update_kline(kline);
-        }
+// 在 QuantApp::new() 中为每条通道启动一个 GPUI 前台消费任务
+// （完整实现见 §4.6；核心模式：rx.recv().await 挂起 → state.update → cx.notify）
+cx.spawn(|_, mut cx| async move {
+    while let Some(msg) = ticker_rx.recv().await {  // mpsc recv 是同步原语，不依赖 tokio reactor，前台安全
+        state_weak.update(&mut cx, |state, cx| {    // WeakEntity<AppState>
+            state.apply_ticker(msg);
+            cx.notify();                            // 必须 notify 才重渲染
+        }).ok();                                    // AppState 已释放则退出
     }
-
-    // 非阻塞读取所有待处理 Ticker 消息
-    while let Ok(ws_ticker) = self.ticker_rx.try_recv() {
-        if let Some(ticker) = ws_ticker.to_ticker() {
-            self.update_ticker(ticker);
-        }
-    }
-
-    // ... UI 渲染代码 ...
-}
+});
 ```
+
+通道容量分析不变：`unbounded` 通道允许无限缓冲，UI 端从 `try_recv()` 轮询改为
+`recv().await` 常驻消费——消费速度只受 GPUI 前台调度影响，Ticker 每秒数条的推送
+频率远低于前台任务处理能力，无需担心积压。
 
 ---
 
@@ -530,89 +529,101 @@ impl RealtimeService {
 
 ## 4.6 UI 集成
 
-### 在 update() 中消费实时数据
+### 消费循环：cx.spawn + rx.recv().await
+
+GPUI 侧没有 "update() 每帧 poll"，取而代之的是**前台消费任务**：`cx.spawn` 启动的
+async 任务挂在 `rx.recv().await` 上，消息到达即更新 Entity 状态并 `cx.notify()`。
 
 ```rust
 // src/ui/app.rs
 impl QuantApp {
-    /// 处理实时 K 线更新
-    fn update_kline(&mut self, kline: Kline) {
-        let klines = &mut self.state.current_klines;
+    pub fn new(
+        state: Entity<AppState>,
+        kline_rx: mpsc::UnboundedReceiver<WsKline>,
+        ticker_rx: mpsc::UnboundedReceiver<WsTicker>,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let state_weak = state.downgrade();   // WeakEntity：避免强引用循环
 
-        if let Some(last) = klines.last_mut() {
-            if last.open_time == kline.open_time {
-                // 更新最后一根蜡烛（未关闭的 K 线）
-                *last = kline;
-            } else if kline.open_time > last.open_time {
-                // 新 K 线，追加到末尾
-                klines.push(kline);
-                // 保持最大缓存数量
-                if klines.len() > 10000 {
-                    klines.remove(0);
+        // K 线消费循环
+        let kline_task = cx.spawn(|_, mut cx| async move {
+            while let Some(msg) = kline_rx.recv().await {
+                // mpsc recv 是同步原语，不依赖 tokio reactor，前台安全
+                if let Some(kline) = msg.to_kline() {
+                    state_weak.update(&mut cx, |state, cx| {
+                        state.apply_kline(kline);
+                        cx.notify();          // 必须 notify 才重渲染
+                    }).ok();                  // AppState 已释放则静默退出
                 }
             }
-        } else {
-            klines.push(kline);
-        }
+        });
 
-        // 重新计算指标
-        self.state.recompute_indicators();
-        self.state.last_update_time = Some(kline.close_time);
-    }
-
-    /// 处理实时 Ticker 更新
-    fn update_ticker(&mut self, ticker: Ticker) {
-        // 价格闪烁效果：比较新旧价格
-        if let Some(ref old_ticker) = self.state.latest_ticker {
-            if ticker.symbol == old_ticker.symbol {
-                self.price_flash_color = if ticker.price > old_ticker.price {
-                    Some(Color32::from_rgb(0, 200, 83))  // 涨：绿色闪烁
-                } else if ticker.price < old_ticker.price {
-                    Some(Color32::from_rgb(234, 57, 67))  // 跌：红色闪烁
-                } else {
-                    None
-                };
-                // 闪烁效果持续 500ms
-                if self.price_flash_color.is_some() {
-                    self.flash_timer = Some(std::time::Instant::now());
+        // Ticker 消费循环
+        let state_weak = state.downgrade();
+        let ticker_task = cx.spawn(|_, mut cx| async move {
+            while let Some(msg) = ticker_rx.recv().await {
+                if let Some(ticker) = msg.to_ticker() {
+                    state_weak.update(&mut cx, |state, cx| {
+                        state.update_ticker(ticker);
+                        cx.notify();
+                    }).ok();
                 }
             }
-        }
+        });
 
-        self.state.latest_ticker = Some(ticker);
-        self.state.is_connected = true;
-    }
-}
-
-impl eframe::App for QuantApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // 1. 消费实时数据
-        while let Ok(ws_kline) = self.kline_rx.try_recv() {
-            if let Some(kline) = ws_kline.to_kline() {
-                self.update_kline(kline);
-            }
+        Self {
+            state,
+            /* ...面板 Entity... */
+            _kline_task: kline_task,      // Task 存字段防 drop 取消
+            _ticker_task: ticker_task,
         }
-        while let Ok(ws_ticker) = self.ticker_rx.try_recv() {
-            if let Some(ticker) = ws_ticker.to_ticker() {
-                self.update_ticker(ticker);
-            }
-        }
-
-        // 2. 检查闪烁效果是否过期
-        if let Some(flash_start) = self.flash_timer {
-            if flash_start.elapsed().as_millis() > 500 {
-                self.price_flash_color = None;
-                self.flash_timer = None;
-            }
-        }
-
-        // 3. UI 渲染（Panel 布局...）
-        // ...
     }
 }
 ```
 
-### 数据更新策略
+### Task 句柄存字段（防 drop 取消）
+
+- `cx.spawn` 返回的 `Task` 被 drop 时任务立即取消——消费循环一旦被 drop，实时数据
+  就再也不进 UI（且无任何报错）
+- 因此 `Task` 必须存入 QuantApp 字段：`_kline_task` / `_ticker_task`
+  （下划线前缀表达"仅持有防取消，不读取"）
+
+### cx.notify() 纪律
+
+- 消费循环里的状态更新**必须**以 `cx.notify()` 收尾，否则数据更新了 UI 不动
+- `state_weak.update(...).ok()`：Entity 已释放（窗口关闭）时返回 Err，静默退出循环
+
+### 实时数据应用策略
+
+数据逻辑收敛为 AppState 方法（与 UI 框架无关，可直接单测）：
+
+```rust
+impl AppState {
+    /// 应用实时 K 线：更新最后一根（未关闭）或追加新蜡烛（已关闭）
+    pub fn apply_kline(&mut self, kline: Kline) {
+        if let Some(last) = self.current_klines.last_mut() {
+            if last.open_time == kline.open_time {
+                *last = kline;                     // 未关闭 K 线：原地更新
+            } else if kline.open_time > last.open_time {
+                self.current_klines.push(kline);   // 新 K 线：追加
+                if self.current_klines.len() > 10000 {
+                    self.current_klines.remove(0); // 保持最大缓存数量
+                }
+            }
+        } else {
+            self.current_klines.push(kline);
+        }
+        self.recompute_indicators();               // 仅 K 线变化时重算指标
+        self.last_update_time = Some(kline.close_time);
+    }
+
+    /// 应用实时 Ticker：全量替换 + 连接状态置真
+    pub fn update_ticker(&mut self, ticker: Ticker) {
+        self.latest_ticker = Some(ticker);
+        self.is_connected = true;
+    }
+}
+```
 
 | 数据类型 | 策略 | 说明 |
 |---------|------|------|
@@ -621,48 +632,83 @@ impl eframe::App for QuantApp {
 | Ticker | 全量替换 | 每次推送覆盖 `latest_ticker` |
 | 指标 | 增量重算 | 仅在 K 线变化时重新计算，避免每帧重算 |
 
-### 设计要点
+### 价格闪烁效果（Entity 状态 + notify）
 
-- `try_recv()` 非阻塞消费，不阻塞 UI 线程
-- K 线更新区分"进行中"和"已关闭"，避免重复追加
-- 价格闪烁效果：比较新旧价格，涨绿闪/跌红闪，持续 500ms 后消失
-- 指标仅在 K 线变化时重算，避免每帧重复计算
+```rust
+// src/ui/app_state.rs —— 闪烁相关状态字段
+pub struct AppState {
+    // ...
+    /// 闪烁方向：Some(true)=涨绿 Some(false)=跌红 None=无
+    pub price_flash: Option<bool>,
+    /// 闪烁起始时刻（用于恢复判定）
+    pub flash_started_at: Option<std::time::Instant>,
+}
+```
+
+实现思路：
+
+1. **触发**：`update_ticker` 比较新旧价格——上涨 → `price_flash = Some(true)`、
+   下跌 → `Some(false)`，记录 `flash_started_at`，然后 `cx.notify()`
+2. **渲染**：状态栏价格文字颜色在闪烁期间取 `cx.theme().success / .danger`，其余时刻用默认色
+3. **恢复**：两种方案
+   - 简单方案（推荐）：下一次 `update_ticker` 到来时重新判定闪烁方向；Ticker 高频推送下 UX 差异极小，且无需定时器
+   - 精确方案：触发闪烁时 `cx.spawn` 一个 500ms 后清零 `price_flash` 并 `cx.notify()` 的一次性任务
+     （注意：GPUI 前台 Future 不能用 `tokio::time::sleep` 做延时——见下节陷阱 1）
+
+### tokio 桥接三条陷阱
+
+GPUI 前台与 tokio 是两个独立 runtime，混用时有三条经典陷阱：
+
+| # | 陷阱 | 表现 | 正确做法 |
+|---|------|------|---------|
+| 1 | GPUI 前台 Future 不能创建 tokio timer | 在 `cx.spawn` 的 async block 中调用 `tokio::time::sleep` → panic "no reactor" | 延时逻辑放到 tokio 侧任务（`handle.spawn`）中执行 |
+| 2 | `cx.background_spawn` 不能直接轮询依赖 tokio reactor 的 Future | 把 `tokio::net` / `tokio::time` 类 Future 扔给 background_spawn 后挂起不动 | 依赖 tokio reactor 的等待留在 tokio 任务里；mpsc 的 `recv()` 是同步原语（不依赖 reactor），前台 await 安全 |
+| 3 | UI 测试不得依赖 tokio worker 完成时序 | 测试中发送通道消息后立即断言 UI 状态 → 偶发失败（消费循环可能尚未被调度） | 纯数据逻辑（`apply_kline` / `update_ticker`）独立单测；桥接链路交给手动验收（§4.9） |
 
 ---
 
 ## 4.7 并发模型
 
-### 任务拓扑
+### 任务拓扑：GPUI 主线程 + tokio runtime 双 runtime 架构
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    tokio runtime                             │
+│                 应用进程（双 runtime）                        │
 │                                                             │
-│  ┌─────────────────┐    ┌──────────────────────────────┐   │
-│  │  egui 主线程     │    │  ws_kline task               │   │
-│  │  (UI 渲染)       │◀───│  (K 线 WebSocket)            │   │
-│  │                 │    │  tokio-tungstenite            │   │
-│  │  update() {     │    │  btcusdt@kline_1m             │   │
-│  │    try_recv()   │    └──────────────────────────────┘   │
-│  │    render()     │                                        │
-│  │  }              │    ┌──────────────────────────────┐   │
-│  │                 │    │  ws_ticker task               │   │
-│  │  kline_rx ──────│◀───│  (Ticker WebSocket)          │   │
-│  │  ticker_rx ─────│◀───│  btcusdt@ticker               │   │
-│  └─────────────────┘    └──────────────────────────────┘   │
+│  ┌──────────────────────┐    ┌──────────────────────────┐   │
+│  │ GPUI 主线程（UI）      │    │ tokio runtime（IO）       │   │
+│  │                      │    │                          │   │
+│  │ QuantApp (Entity)    │    │  ws_kline task           │   │
+│  │  render() 按需重绘    │◀─mpsc─ (K 线 WebSocket)          │   │
+│  │  cx.spawn 消费循环    │    │  btcusdt@kline_1m        │   │
+│  │  cx.notify()         │    │                          │   │
+│  │                      │    │  ws_ticker task           │   │
+│  │ kline_rx ────────────│◀─mpsc─ (Ticker WebSocket)        │   │
+│  │ ticker_rx            │    │  btcusdt@ticker          │   │
+│  │ （recv().await 挂起） │    │                          │   │
+│  └──────────────────────┘    └──────────────────────────┘   │
 │                                                             │
-│  通信方式：mpsc::UnboundedSender → UI 线程 try_recv()        │
-│  关闭方式：CancellationToken → 所有 task 收到取消信号         │
+│  桥接方式：mpsc::UnboundedSender → GPUI 前台任务 recv().await │
+│  关闭方式：CancellationToken → 所有 tokio task 收到取消信号    │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+要点：
+
+- GPUI 主线程不处于 tokio 上下文：tokio 任务必须在 `main()` 中构建的
+  `tokio::runtime::Runtime` 上通过 `handle.spawn()` 派发（直接 `tokio::spawn` 会 panic）
+- 两侧只通过 mpsc 通道通信，任何一侧不持有另一侧的锁或引用
+- GPUI 侧 IO 等待规则：mpsc `recv()` 前台安全；依赖 tokio reactor 的 Future 留在
+  tokio 侧（§4.6 陷阱表）
+- 两条消费循环用 `cx.spawn`（驱动 UI 状态）；CPU 密集任务（如回测）用 `cx.background_spawn`
 
 ### 任务间通信矩阵
 
 | 发送方 | 接收方 | 通道类型 | 数据 |
 |--------|--------|---------|------|
-| `ws_kline` task | UI 主线程 | `mpsc::UnboundedSender<WsKline>` | 实时 K 线 |
-| `ws_ticker` task | UI 主线程 | `mpsc::UnboundedSender<WsTicker>` | 实时 Ticker |
-| UI 主线程 | `ws_*` tasks | `CancellationToken` | 关闭信号 |
+| `ws_kline` task（tokio） | GPUI 前台消费任务（`cx.spawn`） | `mpsc::UnboundedSender<WsKline>` | 实时 K 线 |
+| `ws_ticker` task（tokio） | GPUI 前台消费任务（`cx.spawn`） | `mpsc::UnboundedSender<WsTicker>` | 实时 Ticker |
+| GPUI 主线程 | `ws_*` tasks | `CancellationToken` | 关闭信号 |
 
 ### 优雅关闭流程
 
@@ -670,7 +716,8 @@ impl eframe::App for QuantApp {
 1. 用户关闭窗口
        │
        ▼
-2. eframe 触发 Drop（或显式调用）
+2. GPUI 退出路径上显式调用 RealtimeService::stop()
+   （不能依赖 Drop —— drop 无法 await，见 §4.5 stop() 实现）
        │
        ▼
 3. cancel_token.cancel()
@@ -679,20 +726,20 @@ impl eframe::App for QuantApp {
 4. 所有 ws_* task 的 tokio::select! 命中 cancelled() 分支
        │
        ▼
-5. WebSocket 连接自动关闭（Drop WebSocket 对象）
+5. WebSocket 连接关闭（Drop WebSocket 对象）
        │
        ▼
 6. handle.await 等待所有 task 退出
        │
        ▼
-7. 主线程退出
+7. application().run() 返回，主线程退出
 ```
 
 ### 设计要点
 
-- egui 运行在主线程，不可异步；后台任务通过 channel 与 UI 通信
-- `CancellationToken` 比 `mpsc` 关闭信号更优雅：支持多个 task 监听同一 token
-- 不使用 `Drop` trait 关闭 WebSocket（`drop` 无法 `await`），改用显式 `stop()` 方法
+- 双 runtime 架构：GPUI 主线程只做 UI 与前台调度；tokio runtime 只做 IO
+- `CancellationToken` 支持多个 task 监听同一 token，比 mpsc 关闭信号更适合广播
+- 显式 `stop()` 优雅关闭；GPUI 消费循环随 Entity 释放自然退出（`update(...).ok()`）
 - 任务拓扑简单：1 个 K 线 task + 1 个 Ticker task，不需要复杂的 task 编排
 
 ---
@@ -794,7 +841,7 @@ impl WsClient {
 ### 错误通知到 UI
 
 ```rust
-// 在 AppState 中添加连接状态
+// 在 AppState 中添加连接状态（结构与原方案一致，存放位置变为 Entity 字段）
 pub struct AppState {
     // ...
     pub ws_status: WsStatus,
@@ -806,25 +853,18 @@ pub enum WsStatus {
     Disconnected { reason: String },
 }
 
-// 在状态栏显示
-impl QuantApp {
-    fn status_bar_ui(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            match &self.state.ws_status {
-                WsStatus::Connected => {
-                    ui.label(RichText::new("● 已连接").color(Color32::GREEN));
-                }
-                WsStatus::Reconnecting { retry_count, next_retry_ms } => {
-                    ui.label(RichText::new(format!(
-                        "● 重连中... (第 {} 次, {}s 后)",
-                        retry_count, next_retry_ms / 1000
-                    )).color(Color32::YELLOW));
-                }
-                WsStatus::Disconnected { reason } => {
-                    ui.label(RichText::new(format!("● 断开: {}", reason)).color(Color32::RED));
-                }
-            }
-        });
+// 状态栏渲染（render_status_bar 内，tech/03 §3.7）
+// WsStatus 变化由重连任务经独立 status 通道推送，UI 消费方式同 §4.4/§4.6：
+// cx.spawn 消费 → state.update 写入 ws_status → cx.notify()
+match &state.read(cx).ws_status {
+    WsStatus::Connected => {
+        /* Badge: "已连接"，色取 cx.theme().success */
+    }
+    WsStatus::Reconnecting { retry_count, next_retry_ms } => {
+        /* Badge: "重连中... (第 N 次, Xs 后)"，warning 色 */
+    }
+    WsStatus::Disconnected { reason } => {
+        /* Badge: "断开: reason"，色取 cx.theme().danger */
     }
 }
 ```
@@ -984,3 +1024,19 @@ async fn test_ws_connect_and_receive() {
 - 集成测试使用 `TcpListener` 启动 mock 服务器，避免依赖真实网络
 - 手动验收是 GUI 测试的核心，自动化测试无法完全替代视觉验证
 - `#[tokio::test]` 提供异步测试环境，`mpsc` 通道测试验证数据流正确性
+
+### UI 测试陷阱：不得依赖 tokio worker 完成时序
+
+GPUI 前台消费任务与 tokio worker 分属两个 runtime，调度时序完全独立。测试中
+"发送通道消息 → 立即断言 UI 状态"会偶发失败（消费循环可能尚未被 GPUI 前台调度）。
+
+正确做法：
+
+| 层 | 测试方式 |
+|----|---------|
+| 纯数据逻辑（`apply_kline` / `update_ticker` / 消息解析） | 直接单元测试，不依赖任何 runtime |
+| 通道本身（send/recv、容量行为） | `#[tokio::test]` 中同步驱动，不涉及 GPUI |
+| 桥接链路（通道 → Entity 状态 → 渲染） | 不做时序断言，交给手动验收清单覆盖 |
+
+- 绝不在测试中 `sleep(N)` 等待后台 worker "恰好"完成——双 runtime 下没有稳定时序可等
+- 需要确定性验证时，把断言目标收敛到纯数据逻辑；桥接层只验证类型与编译期正确性
