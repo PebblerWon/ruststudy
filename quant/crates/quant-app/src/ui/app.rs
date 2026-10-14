@@ -1,118 +1,9 @@
-use eframe::{App, egui};
-use egui::Color32;
+use gpui_kit::base::{StyledExt, h_flex, v_flex};
+use gpui_kit::component::ActiveTheme;
+use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants};
+use gpui_kit::component::select::{Select, SelectState};
+use gpui_kit::*;
 use quant_data::common::models::Interval;
-
-use crate::ui::control_panel::WatchlistPanel;
-
-pub struct QuantApp {
-    pub value: f64,
-    state: AppState,
-    watchlist: WatchlistPanel,
-}
-impl QuantApp {
-    pub fn new(v: f64) -> Self {
-        QuantApp {
-            value: v,
-            state: AppState {
-                is_connected: true,
-                selected_symbol: "".to_string(),
-                current_interval: Interval::M1,
-                last_update_time: Some(chrono::Utc::now().timestamp()),
-                available_symbols: vec!["a".to_string(), "b".to_string(), "c".to_string()],
-            },
-            watchlist: WatchlistPanel::new(),
-        }
-    }
-    fn toolbar_ui(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.label("交易对：");
-
-            egui::ComboBox::from_id_salt("symbol_select")
-                .selected_text(&self.state.selected_symbol)
-                .show_ui(ui, |ui| {
-                    for symbol in &self.state.available_symbols {
-                        ui.selectable_value(
-                            &mut self.state.selected_symbol,
-                            symbol.clone(),
-                            symbol,
-                        );
-                    }
-                });
-
-            ui.separator();
-
-            ui.label("周期：");
-            for interval in [
-                Interval::M1,
-                Interval::M5,
-                Interval::M15,
-                Interval::H1,
-                Interval::H4,
-                Interval::D1,
-            ] {
-                let label = interval.as_str();
-                let is_selected = self.state.current_interval == interval;
-                if ui.selectable_label(is_selected, label).clicked() {
-                    self.state.current_interval = interval;
-                    // self.state.load_kline_data();
-                }
-            }
-        });
-    }
-
-    fn status_bar_ui(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            let (dot_color, status_text) = if self.state.is_connected {
-                (Color32::from_rgb(0, 200, 83), "已连接")
-            } else {
-                (Color32::from_rgb(234, 57, 67), "未连接")
-            };
-            ui.add(egui::Label::new(egui::RichText::new("●").color(dot_color)));
-
-            ui.label(status_text);
-            ui.separator();
-
-            // 最新价格
-            ui.label(format!("{}: {:.2}", "13:54:20", 35.98));
-            ui.separator();
-            if let Some(ts) = self.state.last_update_time {
-                let time_str = chrono::DateTime::from_timestamp_millis(ts)
-                    .map(|dt| dt.format("%H:%M:%S").to_string())
-                    .unwrap_or_default();
-                ui.label(format!("更新：{}", time_str));
-            }
-            ui.separator();
-            ui.label(format!("K 线：{} 条", 10));
-        });
-    }
-}
-impl eframe::App for QuantApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        egui::TopBottomPanel::top("toolbar").show(ctx, |ui| {
-            self.toolbar_ui(ui);
-        });
-
-        egui::TopBottomPanel::bottom("status_bar").show(ctx, |ui| {
-            self.status_bar_ui(ui);
-        });
-
-        egui::TopBottomPanel::bottom("indicator_panel")
-            .default_height(200.0)
-            .show(ctx, |ui| {
-                // self.indicator_panel_ui(ui, &mut self.state);
-            });
-
-        egui::SidePanel::left("watchlist")
-            .default_width(250.0)
-            .min_width(200.0)
-            .show(ctx, |ui| {
-                self.watchlist.ui(ui, &mut self.state);
-            });
-        egui::CentralPanel::default().show(ctx, |ui| {
-            //
-        });
-    }
-}
 
 pub struct AppState {
     pub selected_symbol: String,
@@ -120,4 +11,56 @@ pub struct AppState {
     pub available_symbols: Vec<String>,
     pub is_connected: bool,
     pub last_update_time: Option<i64>,
+}
+pub struct QuantApp {
+    store: Entity<AppState>,
+    _subscription: Subscription,
+    // pub watchlist:Entity<WatchlistPanel> ,
+
+    // pub char
+}
+impl QuantApp {
+    pub fn new(cx: &mut Context<Self>) -> Self {
+        let store = cx.new(|_| AppState {
+            is_connected: true,
+            selected_symbol: "".to_string(),
+            current_interval: Interval::M1,
+            last_update_time: Some(chrono::Utc::now().timestamp()),
+            available_symbols: vec!["a".to_string(), "b".to_string(), "c".to_string()],
+        });
+        let _subscription = cx.observe(&store, |_, _, cx| cx.notify());
+        QuantApp {
+            store,
+            _subscription,
+        }
+    }
+    fn render_toolbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let state = self.store.read(cx);
+
+        let symbol_state = cx.new(|cx| SelectState::new(vec!["a", "b", "c"], None, window, cx));
+
+        h_flex()
+            .px_3()
+            .py_2()
+            .gap_3()
+            .items_center()
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .child("交易对")
+            .child(Select::new(&symbol_state).placeholder("请选择").w_40())
+            .child(
+                ButtonGroup::new("interval")
+                    .child(Button::new(Interval::M1.as_str()).label(Interval::M1.as_str()))
+                    .child(Button::new(Interval::M5.as_str()).label(Interval::M5.as_str()))
+                    .child(Button::new(Interval::M15.as_str()).label(Interval::M15.as_str()))
+                    .child(Button::new(Interval::H1.as_str()).label(Interval::H1.as_str()))
+                    .child(Button::new(Interval::H4.as_str()).label(Interval::H4.as_str()))
+                    .child(Button::new(Interval::D1.as_str()).label(Interval::D1.as_str())),
+            )
+    }
+}
+impl Render for QuantApp {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        v_flex().size_full().child(self.render_toolbar(window, cx))
+    }
 }
