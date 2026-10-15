@@ -28,7 +28,7 @@ Rust 初学者（项目所有者），前端背景，已完成 myapp + rustkv，
   - 验收：与 TradingView 误差 < 0.01%；新增指标只需实现 trait
 - **F3 主界面仪表盘**：gpui 桌面，品种列表 + K 线图 + 指标面板 + 状态栏
   - 验收：品种/周期流畅切换；有 loading 态；状态栏显示连接状态
-- **F4 K 线图渲染**：gpui-kit CandlestickChart 原生 K 线组件，缩放/平移，叠加指标曲线 + 成交量
+- **F4 K 线图渲染**：gpui-kit CandlestickChart 原生 K 线组件（内置 OHLC tooltip/网格/坐标轴），缩放/平移自实现，叠加指标曲线 + 成交量
   - 验收：红绿蜡烛正确；交互流畅无卡顿
 
 ### 3.2 P1 增强功能（Phase 4-5 交付）
@@ -71,7 +71,7 @@ Rust 初学者（项目所有者），前端背景，已完成 myapp + rustkv，
 **Phase 3 — 界面层**
 
 - gpui 桌面应用：主界面仪表盘（品种列表 + K 线图 + 指标面板 + 状态栏）
-- K 线图渲染：gpui-kit CandlestickChart 原生组件，支持缩放/平移/指标叠加
+- K 线图渲染：gpui-kit CandlestickChart 原生组件，内置 OHLC tooltip，支持指标叠加；缩放/平移按数据窗口模式自实现
 - 品种/周期切换流畅，有 loading 态
 
 **Phase 4 — 实时层**

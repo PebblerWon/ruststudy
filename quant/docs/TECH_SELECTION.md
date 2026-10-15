@@ -237,7 +237,8 @@ serde_json = "1"
 polars = { version = "0.46", features = ["lazy", "temporal", "parquet"] }
 chrono = { version = "0.4", features = ["serde"] }
 
-# GUI（gpui-kit 内部封装 gpui-pre 0.3.9，use gpui_kit::* 即可获得全部 GPUI API；
+# GUI（gpui-kit 重导出 GPUI 核心 API：use gpui_kit::* 获得 div/Entity/Window 等；
+#      组件库走 gpui_kit::component::*，布局辅助 v_flex/h_flex 走 gpui_kit::base::*。
 #      严禁直接添加 gpui = "0.2" —— 与 gpui-pre 是两条不兼容发布线，同时依赖会类型冲突）
 gpui-kit = "0.7.3"
 
@@ -323,7 +324,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 chrono = { workspace = true }
 polars = { workspace = true }
-gpui-kit = { workspace = true }   # 内含 gpui-pre 全量 API，use gpui_kit::* 使用
+gpui-kit = { workspace = true }   # use gpui_kit::* 得 GPUI 核心 API；组件库走 gpui_kit::component::*
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

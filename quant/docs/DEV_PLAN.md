@@ -89,11 +89,11 @@
   - **产出：** quant-app/src/ui/app.rs + theme.rs | **学习点：** gpui 生命周期、v_flex/h_flex 布局、DockArea
   - **技术方案：** 见 [tech/03_ui_layer.md § 3.1](tech/03_ui_layer.md)
 
-- [ ] **T3.2 品种列表与控件** — 左侧交易对列表 + 顶部时间框架切换
-  - **产出：** quant-app/src/ui/control_panel.rs | **学习点：** gpui-kit 控件、状态绑定
+- [ ] **T3.2 品种列表与控件** — 左侧交易对列表（搜索过滤 + 涨跌配色）+ 顶部时间框架切换
+  - **产出：** quant-app/src/ui/watchlist.rs | **学习点：** gpui-kit 控件、状态绑定
   - **技术方案：** 见 [tech/03_ui_layer.md § 3.2](tech/03_ui_layer.md)
 
-- [ ] **T3.3 K 线图渲染** — gpui-kit CandlestickChart 组件集成（红绿蜡烛 + 自动 OHLC tooltip），缩放 + 平移
+- [ ] **T3.3 K 线图渲染** — gpui-kit CandlestickChart 组件集成（红绿蜡烛 + 内置 OHLC tooltip），缩放/平移按数据窗口模式自实现（组件不内置，见 tech/03 §3.5）
   - **产出：** quant-app/src/ui/chart.rs | **学习点：** CandlestickChart 链式 API、主题色板
   - **技术方案：** 见 [tech/03_ui_layer.md § 3.3](tech/03_ui_layer.md)
 

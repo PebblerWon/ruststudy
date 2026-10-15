@@ -36,13 +36,32 @@ Phase 1 (data)          Phase 2 (indicators)       Phase 3 (ui)
 
 ## 3.2 应用入口与 gpui 配置
 
+### gpui-kit 三层 import 模型（最容易踩的坑）
+
+`use gpui_kit::*;` 只重导出 **GPUI 核心 API**（div、Window、Context、Entity、Task、Hsla...）。
+组件库与布局辅助在子模块中，需按路径显式导入：
+
+| 要用的东西 | 正确导入路径 |
+|-----------|-------------|
+| GPUI 核心（div / Window / Context / Entity / Render / Hsla...） | `use gpui_kit::*;` |
+| `v_flex()` / `h_flex()` / `StyledExt` | `use gpui_kit::base::{h_flex, v_flex, StyledExt};` |
+| `ActiveTheme`（`cx.theme()`） | `use gpui_kit::component::ActiveTheme;` |
+| Button / ButtonGroup | `use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants};` |
+| Input / InputState / InputEvent | `use gpui_kit::component::input::{Input, InputState, InputEvent};` |
+| Select / SelectState | `use gpui_kit::component::select::{Select, SelectState};` |
+| 图表（CandlestickChart / LineChart / BarChart...） | `use gpui_kit::component::chart::*;` |
+| Dock / DockArea / Panel / DockLayout / PanelEvent | `use gpui_kit::component::dock::*;` |
+| Badge / Plot / IntoPlot 等 | `use gpui_kit::component::badge::*;` / `use gpui_kit::component::plot::*;` |
+| `.when(cond, ...)` 链式条件 | `use gpui_kit::prelude::FluentBuilder;`（prelude 中） |
+
 ### quant-app/Cargo.toml 依赖配置
 
 ```toml
 # quant-app/Cargo.toml
 [dependencies]
 quant-data = { path = "../quant-data" }
-# GUI：gpui-kit 重导出全部 GPUI API（use gpui_kit::*; 即可）
+# GUI：gpui-kit 重导出全部 GPUI 核心 API（use gpui_kit::*;）；
+# 组件库走 gpui_kit::component::*，布局辅助走 gpui_kit::base::*（见 §3.2 import 表）
 # 严禁直接添加 gpui 依赖——与 gpui-kit 是两条不兼容的发布线
 gpui-kit = "0.7.3"
 # 继承 workspace 依赖
@@ -60,11 +79,23 @@ tracing-subscriber = { workspace = true }
 ### workspace profile 性能覆盖
 
 ```toml
-# 根 Cargo.toml（workspace）追加：debug 下依赖默认 O0，gpui 渲染会明显卡顿，
-# 为第三方依赖启用基础优化（自身代码仍为 O0，保留快速编译与断点调试）
-[profile.dev.package."*"]
-opt-level = 1
+# 根 Cargo.toml（workspace）：debug 下依赖默认 O0，gpui 渲染/字体排版会明显卡顿，
+# 为 gpui 栈与字体排版依赖启用 O3（自身代码仍为 O0，保留快速编译与断点调试）
+[profile.dev.package]
+gpui-pre          = { opt-level = 3 }
+gpui-pre-macros   = { opt-level = 3 }
+gpui-pre-platform = { opt-level = 3 }
+gpui-kit          = { opt-level = 3 }
+gpui-kit-assets   = { opt-level = 3 }
+gpui-component    = { opt-level = 3 }
+gpui-base         = { opt-level = 3 }
+rustybuzz         = { opt-level = 3 }
+taffy             = { opt-level = 3 }
+ttf-parser        = { opt-level = 3 }
 ```
+
+> 不想列清单的简化替代：`[profile.dev.package."*"]` + `opt-level = 1`（所有第三方依赖基础优化），
+> 效果略差（自身依赖无法到 O3）但免维护；二选一即可。
 
 ### 构建要求
 
@@ -98,6 +129,8 @@ fn main() {
 
 ```rust
 // src/ui/app.rs
+use gpui_kit::base::{StyledExt, h_flex, v_flex}; // StyledExt 提供 border_b_1 等扩展样式
+use gpui_kit::component::ActiveTheme;
 use gpui_kit::*;
 use quant_data::common::models::{Kline, Ticker, Interval};
 
@@ -136,9 +169,12 @@ impl Render for QuantApp {
 
 ```rust
 // src/ui/app.rs（render_dock 部分，骨架）
-// 面板协议：每个 Dock 面板需实现 BasePanel + Panel + Render + Focusable + EventEmitter<PanelEvent>
-// 组装：DockSkin::dock_area(...) 创建工作区，
-// DockLayout::h_split()（水平分割）/ tabs()（标签页）组合出三区布局；
+// 面板协议：实现 gpui-kit 的 Panel trait（use gpui_kit::component::dock::*）。
+// Panel 继承 gpui-base 的 BasePanel，后者要求 EventEmitter<PanelEvent> + Render + Focusable——
+// 即一个面板类型需要：impl Panel + impl EventEmitter<PanelEvent> + impl Render + impl Focusable
+// 组装：DockSkin::dock_area(id, version, window, cx) 返回 (Entity<DockArea>, Rc<DockSkin>)，
+// DockArea::set_center(DockLayout::h_split()... ) 组合 h_split()（水平）/ v_split()（垂直）/
+// tabs()（标签页）构建三区布局；
 // 布局树可 serde 持久化到本地，下次启动还原（组合 API 见官方文档 Dock 页）
 ```
 
@@ -152,7 +188,7 @@ impl Render for QuantApp {
 │ Watchlist│      ChartArea (K 线图)      │  IndicatorPanel │
 │ (品种列表)│   CandlestickChart          │  (指标面板)      │
 │ BTCUSDT  │   gpui-kit 原生组件          │  SMA/EMA/RSI    │
-│ ETHUSDT  │   内置缩放/平移/tooltip       │  MACD/BB        │
+│ ETHUSDT  │   内置 OHLC tooltip/网格     │  MACD/BB        │
 ├──────────┴─────────────────────────────┴─────────────────┤
 │        StatusBar：● 已连接 | BTCUSDT 65,432.10 | 更新      │
 └──────────────────────────────────────────────────────────┘
@@ -171,7 +207,10 @@ impl Render for QuantApp {
 
 ```rust
 // src/ui/watchlist.rs
-use gpui_kit::*;
+use gpui_kit::prelude::FluentBuilder;                  // .when(...)
+use gpui_kit::base::{h_flex, v_flex};
+use gpui_kit::component::ActiveTheme;                  // cx.theme()
+use gpui_kit::component::input::{InputState, InputEvent};
 
 pub struct WatchlistPanel {
     pub filter_input: Entity<InputState>,  // 搜索框（gpui-kit Input）
@@ -229,7 +268,9 @@ cx.subscribe_in(&filter_input, window, |this, input, event, _window, cx| {
 
 ### gpui-kit CandlestickChart：原生 K 线组件
 
-直接使用 gpui-kit **CandlestickChart** 原生组件，内置缩放/平移/自动 OHLC tooltip，无需手绘。
+直接使用 gpui-kit **CandlestickChart** 原生组件。**内置**：hover 自动 OHLC tooltip、网格、
+坐标轴标签、入场动画；**不内置缩放/平移**——0.7.3 的 Chart/Plot 层只做 hover 交互，
+K 线缩放/平移需自行实现（方案见下）。
 
 ```rust
 // src/ui/chart.rs
@@ -259,23 +300,42 @@ pub fn to_candles(klines: &[Kline]) -> Vec<CandleData> {
 ### ChartPanel 渲染
 
 ```rust
+// src/ui/chart.rs
+use gpui_kit::prelude::FluentBuilder;
+use gpui_kit::base::div;
+use gpui_kit::component::ActiveTheme;
+use gpui_kit::component::chart::CandlestickChart;
+
 impl Render for ChartPanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let candles = to_candles(&self.klines);
         if candles.is_empty() {
-            return div().size_full().flex().items_center().justify_center().child("暂无 K 线数据");
+            // 早返回与正常返回是两个不同类型，必须 into_any_element() 抹平
+            return div().size_full().flex().items_center().justify_center()
+                .child("暂无 K 线数据").into_any_element();
         }
-        // 访问器闭包描述"怎么读数据"；坐标变换/缩放/平移/tooltip 组件内置
+        // 访问器闭包描述"怎么读数据"；tooltip/网格/坐标轴组件内置
         CandlestickChart::new(candles)
             .x(|d| d.time.clone())
             .open(|d| d.open).high(|d| d.high).low(|d| d.low).close(|d| d.close)
-            .body_width_ratio(0.4)          // 蜡烛实体宽度占格子比例
+            .body_width_ratio(0.4)          // 蜡烛实体宽度占格子比例（默认 0.8）
             .bullish(cx.theme().success)    // 阳线：绿涨（加密货币惯例）
             .bearish(cx.theme().danger)     // 阴线：红跌
+            .into_any_element()
         // 鼠标悬停自动渲染 OHLC tooltip，无需任何绘制代码
     }
 }
 ```
+
+### 缩放/平移：自行实现（组件不提供）
+
+组件无内置 zoom/pan，Phase 3 可先交付静态渲染，缩放/平移作为增强按"数据窗口"模式实现：
+
+1. ChartPanel 增加视口状态字段：`visible_start: usize, visible_len: usize`
+2. `on_scroll_wheel`（`cx.listener`）按滚轮调整 `visible_len`（缩放）/ 配合按键或拖拽平移 `visible_start`
+3. `render` 时只把 `&klines[visible_start..visible_start+visible_len]` 传给 CandlestickChart——
+   组件按传入数据自适应坐标轴，天然完成"视图变换"
+4. 状态变更后记得 `cx.notify()`
 
 ### 指标曲线叠加
 
@@ -298,13 +358,14 @@ impl Plot for IndicatorOverlay {
 
 | 能力 | egui Shape API 手绘 | gpui-kit CandlestickChart |
 |------|--------------------|--------------------------|
-| 坐标变换 / 缩放 / 平移 | 手写仿射映射 + `handle_zoom` / `handle_pan` | 组件内置交互 |
 | OHLC tooltip / 网格 / 坐标轴 | 自行实现 | 内置 |
-| K 线部分代码量 | ~300 行 | ~30 行 |
+| 缩放 / 平移 | 手写仿射映射 + `handle_zoom` / `handle_pan` | 组件不提供，按"数据窗口"模式自实现（见上） |
+| K 线部分代码量 | ~300 行 | ~30 行（不含自实现缩放/平移） |
 
 ### 设计要点
 
 - 访问器闭包把数据结构与组件解耦；涨跌配色遵循加密货币惯例（bullish 绿 / bearish 红）
+- `#[derive(IntoPlot)]` 会为类型生成 `IntoElement`（包一层 `PlotElement`），自定义 Plot 可直接 `.child()` 进元素树
 - 同系列 `LineChart` / `BarChart` / `AreaChart` 供指标面板复用
 
 ---
@@ -385,6 +446,12 @@ fn render_status_bar(&mut self, _window: &mut Window, cx: &mut Context<Self>) ->
 ### 设计要点
 
 - Badge / Select / Button 的具体构造参数见官方文档对应组件页；时间格式化复用 `chrono`
+- **组件状态 Entity 绝不能在 `render()` 里创建**：`SelectState` / `InputState` 这类有状态的
+  Entity 必须在 `new(window, cx)` 中 `cx.new(...)` 创建并存入字段，`render()` 只引用。
+  在 render 里 `cx.new(|cx| SelectState::new(...))` 每次重渲染都会重建 Entity——选中值、
+  焦点、下拉展开状态全部丢失，且旧 Entity 泄漏。这是 gpui 从即时模式迁移过来最容易犯的错
+- Select 的事件订阅（`SelectEvent::Confirm(Option<Value>)`，确认选择时发出）模式与 §3.4
+  搜索框的 `InputEvent::Change` 相同，用 `cx.subscribe_in` + `.detach()`
 
 ---
 
@@ -452,7 +519,7 @@ cx.subscribe_in(&state, window, |this, _state, event, _window, cx| {
 // 事件发送端（如品种列表点击后）：
 state.update(cx, |s, cx| {
     s.selected_symbol = symbol.into();
-    s.load_kline_data();
+    s.load_kline_data(cx);
     cx.emit(AppStateChanged::SymbolSelected(symbol.into())); // 广播给订阅者
     cx.notify();                                             // AppState 自身重渲染
 });
@@ -506,3 +573,5 @@ QuantApp (root) ─ Entity<AppState>（共享状态）＋ Entity<WatchlistPanel 
 
 - gpui-kit 文档：<https://gpui-kit.com>（含中文 zh-CN）；Select / Button / Badge / Dock / Plot 的
   构造参数以文档为准，本文档骨架保证核心交互模式（Entity / notify / listener / subscribe）准确
+- import 路径速查见 §3.2 "三层 import 模型"表；编译报 "cannot find function `v_flex`" /
+  "no method named `theme`" / "no method named `when`" 时，99% 是漏了对应子模块导入

@@ -124,7 +124,7 @@ quant/
 | `ui/app.rs` | `QuantApp` 主状态、`Render` trait 实现、Dock 多面板布局 | ui | Phase 3 |
 | `ui/chart.rs` | K 线 Candlestick 渲染 (gpui-kit CandlestickChart) | ui | Phase 3 |
 | `ui/indicator_panel.rs` | 指标曲线叠加 (gpui-kit LineChart) | ui | Phase 3 |
-| `ui/control_panel.rs` | 交易对选择、时间框架、指标开关 | ui | Phase 3 |
+| `ui/watchlist.rs` | 品种列表：搜索过滤、涨跌配色、选中广播 | ui | Phase 3 |
 | `realtime/ws_client.rs` | WebSocket 连接、自动重连、消息流 | realtime | Phase 4 |
 | `realtime/service.rs` | 解析 Binance WS 消息、转换为 Ticker | realtime | Phase 4 |
 | `backtest/engine.rs` | 向量化回测核心逻辑 | backtest | Phase 5 |
@@ -240,7 +240,9 @@ fn main() {
 gpui 是保留模式 GUI，GPUI 主循环运行在主线程。tokio 侧 IO 任务通过 mpsc 将解析后的行情传给 GPUI 前台任务；mpsc 的 `recv()` 是同步原语、不依赖 tokio reactor，可在 GPUI 前台安全 `await`：
 
 ```rust
-use gpui_kit::*; // 重导出全部 GPUI API（div、Window、Context、Entity、Task...）
+use gpui_kit::*; // 重导出全部 GPUI 核心 API（div、Window、Context、Entity、Task...）
+// 注意：组件库与布局辅助不在 glob 内——v_flex/h_flex 走 gpui_kit::base::*，
+// 组件（Button/Input/图表/Dock）走 gpui_kit::component::*，详见 tech/03 §3.2
 
 // UI 侧：持有 receiver 与 Task 句柄
 struct QuantApp {

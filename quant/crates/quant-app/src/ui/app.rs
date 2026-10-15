@@ -58,6 +58,32 @@ impl QuantApp {
                     .child(Button::new(Interval::D1.as_str()).label(Interval::D1.as_str())),
             )
     }
+
+    fn render_status_bar(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let state = self.store.read(cx);
+        let last_update = state
+            .last_update_time
+            .and_then(chrono::DateTime::from_timestamp_millis)
+            .map(|dt| dt.format("%H:%M:%S").to_string())
+            .unwrap_or_default();
+        h_flex()
+            .px_3()
+            .py_1()
+            .gap_4()
+            .items_center()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .child("")
+            .child(format!("BTCUSDT: {:.2}", 100.482))
+            .child(format!("更新： {}", last_update))
+            .child(format!("K 线: {} 条", 12))
+    }
+
+    fn render_dock(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {}
 }
 impl Render for QuantApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
