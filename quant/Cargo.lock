@@ -2251,7 +2251,7 @@ dependencies = [
  "log",
  "presser",
  "thiserror 2.0.20",
- "windows 0.58.0",
+ "windows 0.62.2",
 ]
 
 [[package]]
@@ -2372,6 +2372,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "gpui-devtools"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ba666f31df384a721502f61b4c23725fe2d2531a9b3eea94c240efff26e40a2"
+dependencies = [
+ "gpui-pre",
 ]
 
 [[package]]
@@ -5719,6 +5728,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "chrono",
+ "gpui-devtools",
  "gpui-kit",
  "quant-data",
  "serde",

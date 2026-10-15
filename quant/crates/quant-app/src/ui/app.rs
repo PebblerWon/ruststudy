@@ -83,10 +83,16 @@ impl QuantApp {
             .child(format!("K 线: {} 条", 12))
     }
 
-    fn render_dock(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {}
+    fn render_dock(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let state = self.store.read(cx);
+        v_flex().size_full().flex_1().child("K线图区域")
+    }
 }
 impl Render for QuantApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        v_flex().size_full().child(self.render_toolbar(window, cx))
+        v_flex()
+            .size_full()
+            .child(self.render_toolbar(window, cx))
+            .child(self.render_dock(window, cx))
     }
 }

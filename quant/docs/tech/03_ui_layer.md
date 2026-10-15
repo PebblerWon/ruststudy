@@ -162,20 +162,135 @@ impl Render for QuantApp {
 
 ## 3.3 主界面布局
 
-### gpui 布局系统与 Dock 工作区
+### gpui 布局系统（Taffy Flexbox）
 
-- 布局基于 **Taffy Flexbox**，样式为 **Tailwind 风格链式** API：`div().flex().flex_col().size_full().gap_2()`；gpui-kit 提供 `v_flex()`（纵向）/ `h_flex()`（横向）辅助
-- 主工作区使用 gpui-kit **Dock** 组件（可停靠、可拖拽、布局可 serde 持久化）：
+- 布局基于 **Taffy Flexbox**，样式为 **Tailwind 风格链式** API：`div().flex().flex_col().size_full().gap_2()`；gpui-kit 提供 `v_flex()`（纵向）/ `h_flex()`（横向）辅助（`gpui_kit::base::{v_flex, h_flex}`，import 见 §3.2）
+- 常用样式方法与 Tailwind 对应：`px_3/py_2/gap_3`（间距）、`items_center/justify_center`（对齐）、`border_b_1().border_color(...)`（边框）、`flex_1`（弹性占比）、`overflow_y_scroll()`（滚动）、`w_40/h_full/size_full`（尺寸）。完整清单见 `gpui_kit::base::StyledExt` 与 gpui 的 `Styled` trait
+- 顶栏 / 状态栏这类单行结构直接 `h_flex()` 拼装（§3.7）；多面板工作区用 Dock
+
+### Dock 工作区：三区布局组装
+
+主工作区使用 gpui-kit **Dock** 组件（`gpui_kit::component::dock::*`）：面板可拖拽重排、
+停靠到左/右/下边缘、布局可 serde 持久化。**组装在 `QuantApp::new` 中一次完成**，
+`render()` 只引用 `Entity<DockArea>`：
 
 ```rust
-// src/ui/app.rs（render_dock 部分，骨架）
-// 面板协议：实现 gpui-kit 的 Panel trait（use gpui_kit::component::dock::*）。
-// Panel 继承 gpui-base 的 BasePanel，后者要求 EventEmitter<PanelEvent> + Render + Focusable——
-// 即一个面板类型需要：impl Panel + impl EventEmitter<PanelEvent> + impl Render + impl Focusable
-// 组装：DockSkin::dock_area(id, version, window, cx) 返回 (Entity<DockArea>, Rc<DockSkin>)，
-// DockArea::set_center(DockLayout::h_split()... ) 组合 h_split()（水平）/ v_split()（垂直）/
-// tabs()（标签页）构建三区布局；
-// 布局树可 serde 持久化到本地，下次启动还原（组合 API 见官方文档 Dock 页）
+// src/ui/app.rs
+use gpui_kit::component::dock::{DockArea, DockSkin, DockLayout, DockPlacement};
+
+pub struct QuantApp {
+    pub state: Entity<AppState>,               // 集中状态（§3.8）
+    pub dock_area: Entity<DockArea>,           // Dock 工作区
+    // 面板 Entity 另存字段：后续订阅事件、直接读写面板状态时用
+    pub watchlist: Entity<WatchlistPanel>,
+    pub chart: Entity<ChartPanel>,
+    pub indicator_panel: Entity<IndicatorPanel>,
+}
+
+impl QuantApp {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let state = cx.new(|_| AppState::new());
+        let watchlist = cx.new(|cx| WatchlistPanel::new(window, cx));
+        let chart = cx.new(|cx| ChartPanel::new(window, cx));
+        let indicator_panel = cx.new(|cx| IndicatorPanel::new(window, cx));
+
+        // DockSkin::dock_area = DockArea::new(id, version, ...) + .with_renderer(DockSkin)
+        // 的便捷组合，返回 (Entity<DockArea>, Rc<DockSkin>)。
+        // version 用于布局持久化的 schema 版本号，布局结构变更时递增
+        let (dock_area, _skin) = DockSkin::dock_area("rustquant", Some(1), window, cx);
+        dock_area.update(cx, |area, cx| {
+            // 左侧停靠区：品种列表
+            area.set_dock(DockPlacement::Left,
+                DockLayout::tabs().panel(watchlist.clone()), window, cx);
+            // 中央工作区：K 线图（Phase 4 后成交量可作第二个标签页加入）
+            area.set_center(DockLayout::tabs().panel(chart.clone()), window, cx);
+            // 右侧停靠区：指标面板
+            area.set_dock(DockPlacement::Right,
+                DockLayout::tabs().panel(indicator_panel.clone()), window, cx);
+        });
+
+        QuantApp { state, dock_area, watchlist, chart, indicator_panel }
+    }
+}
+```
+
+`DockLayout` 是纯数据描述（不构造 Entity），三种节点自由组合出任意布局：
+
+| 构造 | 语义 | 添加内容 |
+|------|------|---------|
+| `DockLayout::h_split()` | 水平分割（左右并排） | `.child(子布局, Some(宽度px)或None)` |
+| `DockLayout::v_split()` | 垂直分割（上下堆叠） | `.child(子布局, Some(高度px)或None)` |
+| `DockLayout::tabs()` | 标签页组 | `.panel(Entity<P>)` + `.active_index(ix)` |
+
+### 面板协议：Dock 面板的最小实现
+
+面板协议：实现 gpui-kit 的 `Panel` trait。`Panel` 继承 gpui-base 的 `BasePanel`
+（要求 `EventEmitter<PanelEvent> + Render + Focusable`），因此一个面板类型共需 4 个 impl；
+其中唯一无默认实现的方法是 `panel_name()`——它是布局持久化中面板的身份键，**发布后不可更改**：
+
+```rust
+// src/ui/watchlist.rs（面板骨架，列表渲染见 §3.4）
+use gpui_kit::component::dock::{Panel, PanelEvent};
+
+pub struct WatchlistPanel {
+    focus_handle: FocusHandle,
+    // ... filter_input / filter / items（§3.4）
+}
+
+impl Panel for WatchlistPanel {
+    fn panel_name(&self) -> &'static str { "watchlist" }
+    // 标签页标题；返回值是元素，可放图标/徽标（默认 t!("Dock.Unnamed")）
+    fn title(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
+        "品种列表"
+    }
+}
+impl EventEmitter<PanelEvent> for WatchlistPanel {}
+impl Focusable for WatchlistPanel {
+    fn focus_handle(&self, _cx: &App) -> FocusHandle { self.focus_handle.clone() }
+}
+impl Render for WatchlistPanel { /* §3.4 */ }
+```
+
+`Panel` 其余方法（`visible/closable/zoomable/set_active/on_removed/dump` 等）均有默认实现，
+按需覆写；`dump` 默认已能导出面板状态供持久化。
+
+### 渲染：DockArea 挂入根视图
+
+`DockArea` 实现了 `Render`，其 `Entity` 可直接作为元素树的 child：
+
+```rust
+impl Render for QuantApp {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        v_flex().size_full()
+            .child(self.render_toolbar(window, cx))     // 顶部工具栏（§3.7）
+            .child(self.dock_area.clone())              // Dock 多面板工作区
+            .child(self.render_status_bar(window, cx))  // 底部状态栏（§3.7）
+    }
+}
+```
+
+### 布局持久化（serde）
+
+布局树可序列化为 `DockAreaState`（实现了 serde）存到本地，下次启动还原——
+用户拖拽后的面板位置/尺寸在重启后保留：
+
+```rust
+// 保存（窗口关闭或菜单动作时）：dump 导出当前布局
+let state = self.dock_area.read(cx).dump(cx);
+std::fs::write("dock_layout.json", serde_json::to_string(&state)?)?;
+
+// 恢复（启动时）：每种自定义面板先注册"panel_name → 构造"反序列化器，
+// 否则 load 遇到不认识的面板会以占位面板替代（布局不丢但面板为空）
+gpui_kit::component::dock::register_panel(cx, "watchlist", |_ctx, window, cx| {
+    Arc::new(cx.new(|cx| WatchlistPanel::new(window, cx)))
+});
+
+// 再 load（注意在 set_dock/set_center 之前执行，两者二选一）
+if let Ok(json) = std::fs::read_to_string("dock_layout.json") {
+    if let Ok(state) = serde_json::from_str::<DockAreaState>(&json) {
+        dock_area.update(cx, |area, cx| { let _ = area.load(state, window, cx); });
+    }
+}
 ```
 
 ### 布局示意
@@ -197,7 +312,13 @@ impl Render for QuantApp {
 ### 设计要点
 
 - **保留模式 UI**：Entity 树持久存在，`render()` 按需重执行（对比 egui 每帧全量重绘，§3.9）
-- Dock 支持面板拖拽重排与布局持久化；根容器 `v_flex().size_full()` 铺满窗口
+- **DockArea 与面板 Entity 只创建一次**（`QuantApp::new` 中），`render()` 只引用——
+  面板里 `InputState` 等可变状态才能跨帧保留，理由同 §3.7
+- 左/右/下停靠区（`set_dock`）自带拖拽宽度手柄与折叠按钮（DockSkin 渲染），
+  适合品种列表、指标面板这类边缘工具窗；中央区（`set_center`）放主内容
+- 面板拖拽重排无需写任何代码；要让布局跨启动保留才需要 §3.3 的持久化小节
+- 三区布局若不用 Dock 也可用 `DockLayout::h_split()` 全塞进 `set_center`——少折叠功能，
+  换来分割比例完全自定义，两者等价合法
 
 ---
 

@@ -18,3 +18,5 @@ chrono = { workspace = true }
 anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+[dev-dependencies]
+gpui-devtools = "0.5"
