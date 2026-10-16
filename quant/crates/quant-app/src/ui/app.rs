@@ -1,9 +1,14 @@
+use gpui_kit::base::dock::{DockArea, DockLayout};
 use gpui_kit::base::{StyledExt, h_flex, v_flex};
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants};
+use gpui_kit::component::dock::DockSkin;
 use gpui_kit::component::select::{Select, SelectState};
 use gpui_kit::*;
+
 use quant_data::common::models::Interval;
+
+use crate::ui::watchlist::WatchlistPanel;
 
 pub struct AppState {
     pub selected_symbol: String,
@@ -13,14 +18,17 @@ pub struct AppState {
     pub last_update_time: Option<i64>,
 }
 pub struct QuantApp {
-    store: Entity<AppState>,
+    pub state: Entity<AppState>,
+
+    pub dock_area: Entity<DockArea>,
+    pub watchlist: Entity<WatchlistPanel>,
     _subscription: Subscription,
     // pub watchlist:Entity<WatchlistPanel> ,
 
     // pub char
 }
 impl QuantApp {
-    pub fn new(cx: &mut Context<Self>) -> Self {
+    pub fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let store = cx.new(|_| AppState {
             is_connected: true,
             selected_symbol: "".to_string(),
@@ -28,14 +36,27 @@ impl QuantApp {
             last_update_time: Some(chrono::Utc::now().timestamp()),
             available_symbols: vec!["a".to_string(), "b".to_string(), "c".to_string()],
         });
+        let (dock_area, dock_skin) = DockSkin::dock_area("rustquant", Some(1), window, cx);
+        let watchlist = cx.new(|cx| WatchlistPanel::new(window, cx, store.clone()));
+        dock_area.update(cx, |area, cx| {
+            area.set_dock(
+                base::dock::DockPlacement::Left,
+                DockLayout::tabs().panel(watchlist.clone()),
+                window,
+                cx,
+            );
+            // area.set_center(DockLayout::h_split(), window, cx);
+        });
         let _subscription = cx.observe(&store, |_, _, cx| cx.notify());
         QuantApp {
-            store,
+            state: store,
+            dock_area,
+            watchlist,
             _subscription,
         }
     }
     fn render_toolbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let state = self.store.read(cx);
+        let state = self.state.read(cx);
 
         let symbol_state = cx.new(|cx| SelectState::new(vec!["a", "b", "c"], None, window, cx));
 
@@ -64,7 +85,7 @@ impl QuantApp {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let state = self.store.read(cx);
+        let state = self.state.read(cx);
         let last_update = state
             .last_update_time
             .and_then(chrono::DateTime::from_timestamp_millis)
@@ -82,17 +103,12 @@ impl QuantApp {
             .child(format!("更新： {}", last_update))
             .child(format!("K 线: {} 条", 12))
     }
-
-    fn render_dock(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let state = self.store.read(cx);
-        v_flex().size_full().flex_1().child("K线图区域")
-    }
 }
 impl Render for QuantApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .size_full()
             .child(self.render_toolbar(window, cx))
-            .child(self.render_dock(window, cx))
+            .child(self.dock_area.clone())
     }
 }
