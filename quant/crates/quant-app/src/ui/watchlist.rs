@@ -1,3 +1,6 @@
+use std::default;
+
+use gpui_kit::base::input::InputEvent;
 use gpui_kit::base::{Selectable, h_flex, v_flex};
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::dock::{BasePanel, Panel, PanelEvent};
@@ -17,7 +20,7 @@ pub struct WatchlistPanel {
     pub filter_input: Entity<InputState>, // 搜索框
     pub filter: String,                   // 过滤关键词
     pub items: Vec<WatchlistItem>,
-    sub: Subscription,
+    sub: Vec<Subscription>,
 }
 
 pub struct WatchlistItem {
@@ -59,6 +62,7 @@ impl WatchlistPanel {
     pub fn new(window: &mut Window, cx: &mut Context<Self>, appstate: Entity<AppState>) -> Self {
         let mut mock_items = Vec::new();
         let mut rng = rand::thread_rng();
+        let mut sub: Vec<Subscription> = Vec::with_capacity(2);
         for i in 0..10 {
             mock_items.push(WatchlistItem {
                 symbol: format!("BTC{}_usdt", i),
@@ -66,12 +70,31 @@ impl WatchlistPanel {
                 change_24h: rng.gen_range(-10.0..10.0),
             });
         }
-        let sub = cx.observe(&appstate, |_, appstate, cx| {
+        sub.push(cx.observe(&appstate, |_, _state, cx| {
             cx.notify();
-        });
+        }));
+        let filter_input = cx.new(|cx| InputState::new(window, cx));
+
+        cx.subscribe_in(
+            &filter_input,
+            window,
+            |view, state, event, window, cx| match event {
+                InputEvent::Change => {
+                    let text = state.read(cx).value();
+                    cx.notify();
+                }
+                _ => (),
+            },
+        );
+        sub.push(cx.observe(&filter_input, |_, state, cx| {
+            let a = state.read(cx).content();
+            println!("{:?}", a);
+
+            // cx.notify();
+        }));
         Self {
             focus_handle: cx.focus_handle(),
-            filter_input: cx.new(|cx| InputState::new(window, cx)),
+            filter_input,
             filter: String::new(),
             items: mock_items,
             app_state: appstate,
@@ -127,9 +150,11 @@ impl WatchlistPanel {
         }
     }
 
+    fn input_change(cx: &mut Context<Self>) {}
     fn select_symbol(&mut self, symbol: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.app_state.update(cx, |p, cx| {
             p.selected_symbol = symbol.to_string();
+            cx.notify();
         });
         println!("select_symbol,{}", symbol);
     }
