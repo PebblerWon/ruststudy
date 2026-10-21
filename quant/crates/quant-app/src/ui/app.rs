@@ -3,7 +3,7 @@ use gpui_kit::base::{StyledExt, h_flex, v_flex};
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::button::{Button, ButtonGroup, ButtonVariants};
 use gpui_kit::component::dock::DockSkin;
-use gpui_kit::component::select::{Select, SelectState};
+use gpui_kit::component::select::{SearchableVec, Select, SelectState};
 use gpui_kit::*;
 
 use quant_data::common::models::Interval;
@@ -24,6 +24,7 @@ pub struct QuantApp {
     pub dock_area: Entity<DockArea>,
     pub watchlist: Entity<WatchlistPanel>,
     pub chart: Entity<ChartPanel>,
+    pub symbol_state: Entity<SelectState<Vec<String>>>,
     _subscription: Subscription,
     // pub watchlist:Entity<WatchlistPanel> ,
 
@@ -41,6 +42,22 @@ impl QuantApp {
         let (dock_area, dock_skin) = DockSkin::dock_area("rustquant", Some(1), window, cx);
         let watchlist = cx.new(|cx| WatchlistPanel::new(window, cx, store.clone()));
         let chart = cx.new(|cx| ChartPanel::new(window, cx));
+
+        let symbol_state = cx.new(|cx| {
+            SelectState::new(
+                vec![
+                    "Rust".to_string(),
+                    "TypeScript".to_string(),
+                    "Go".to_string(),
+                    "Python".to_string(),
+                    "JavaScript".to_string(),
+                ],
+                None,
+                window,
+                cx,
+            )
+        });
+
         dock_area.update(cx, |area, cx| {
             area.set_dock(
                 base::dock::DockPlacement::Left,
@@ -63,12 +80,11 @@ impl QuantApp {
             watchlist,
             chart,
             _subscription,
+            symbol_state,
         }
     }
     fn render_toolbar(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let state = self.state.read(cx);
-
-        let symbol_state = cx.new(|cx| SelectState::new(vec!["a", "b", "c"], None, window, cx));
+        let symbol_state = self.symbol_state.read(cx);
 
         h_flex()
             .px_3()
@@ -78,7 +94,12 @@ impl QuantApp {
             .border_b_1()
             .border_color(cx.theme().border)
             .child("交易对")
-            .child(Select::new(&symbol_state).placeholder("请选择").w_40())
+            .child(
+                Select::new(&self.symbol_state)
+                    .placeholder("请选择")
+                    .w_40()
+                    .menu_width(Length::Definite(px(160.0).into())),
+            )
             .child(
                 ButtonGroup::new("interval")
                     .child(Button::new(Interval::M1.as_str()).label(Interval::M1.as_str()))
@@ -108,6 +129,7 @@ impl QuantApp {
             .items_center()
             .border_t_1()
             .border_color(cx.theme().border)
+            .text_size(px(12.0))
             .child("")
             .child(format!("BTCUSDT: {:.2}", 100.482))
             .child(format!("更新： {}", last_update))
@@ -120,5 +142,6 @@ impl Render for QuantApp {
             .size_full()
             .child(self.render_toolbar(window, cx))
             .child(self.dock_area.clone())
+            .child(self.render_status_bar(window, cx))
     }
 }
