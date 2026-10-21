@@ -2,12 +2,11 @@ use std::default;
 
 use gpui_kit::base::input::InputEvent;
 use gpui_kit::base::{Selectable, h_flex, v_flex};
+use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::button::{Button, ButtonVariants};
 use gpui_kit::component::dock::{BasePanel, Panel, PanelEvent};
 use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::scroll::ScrollableElement;
-use gpui_kit::component::{ActiveTheme, IndexPath};
-use gpui_kit::prelude::FluentBuilder;
 use gpui_kit::*;
 use gpui_kit::{FocusHandle, Focusable, IntoElement};
 use rand::Rng;
@@ -75,23 +74,21 @@ impl WatchlistPanel {
         }));
         let filter_input = cx.new(|cx| InputState::new(window, cx));
 
-        cx.subscribe_in(
-            &filter_input,
-            window,
-            |view, state, event, window, cx| match event {
-                InputEvent::Change => {
-                    let text = state.read(cx).value();
-                    cx.notify();
-                }
-                _ => (),
-            },
-        );
-        sub.push(cx.observe(&filter_input, |_, state, cx| {
-            let a = state.read(cx).content();
-            println!("{:?}", a);
+        let _sub =
+            cx.subscribe_in(
+                &filter_input,
+                window,
+                |this, state, event, window, cx| match event {
+                    InputEvent::Change => {
+                        let text = state.read(cx).value();
+                        this.filter = text.to_string();
+                        cx.notify();
+                    }
+                    _ => (),
+                },
+            );
+        sub.push(_sub);
 
-            // cx.notify();
-        }));
         Self {
             focus_handle: cx.focus_handle(),
             filter_input,
@@ -106,7 +103,7 @@ impl WatchlistPanel {
         let selected = self.app_state.read(cx).selected_symbol.clone();
         v_flex()
             .overflow_y_scrollbar()
-            .children(self.filtered_items().into_iter().map(|item| {
+            .children(self.filtered_items(cx).into_iter().map(|item| {
                 let color = if item.change_24h >= 0.0 {
                     cx.theme().success
                 } else {
@@ -135,17 +132,15 @@ impl WatchlistPanel {
                     }))
             }))
     }
-    fn filtered_items(&self) -> Vec<&WatchlistItem> {
-        if self.filter.is_empty() {
+    fn filtered_items(&self, cx: &mut Context<Self>) -> Vec<&WatchlistItem> {
+        let filter_input_state = self.filter_input.read(cx);
+        let filter = filter_input_state.value().to_lowercase();
+        if filter.is_empty() {
             self.items.iter().collect()
         } else {
             self.items
                 .iter()
-                .filter(|item| {
-                    item.symbol
-                        .to_lowercase()
-                        .contains(&self.filter.to_lowercase())
-                })
+                .filter(|item| item.symbol.to_lowercase().contains(&filter))
                 .collect()
         }
     }
