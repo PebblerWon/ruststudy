@@ -8,6 +8,7 @@ use gpui_kit::*;
 
 use quant_data::common::models::Interval;
 
+use crate::ui::chart::ChartPanel;
 use crate::ui::watchlist::WatchlistPanel;
 
 pub struct AppState {
@@ -22,6 +23,7 @@ pub struct QuantApp {
 
     pub dock_area: Entity<DockArea>,
     pub watchlist: Entity<WatchlistPanel>,
+    pub chart: Entity<ChartPanel>,
     _subscription: Subscription,
     // pub watchlist:Entity<WatchlistPanel> ,
 
@@ -38,10 +40,17 @@ impl QuantApp {
         });
         let (dock_area, dock_skin) = DockSkin::dock_area("rustquant", Some(1), window, cx);
         let watchlist = cx.new(|cx| WatchlistPanel::new(window, cx, store.clone()));
+        let chart = cx.new(|cx| ChartPanel::new(window, cx));
         dock_area.update(cx, |area, cx| {
             area.set_dock(
                 base::dock::DockPlacement::Left,
                 DockLayout::tabs().panel(watchlist.clone()),
+                window,
+                cx,
+            );
+            area.set_dock(
+                base::dock::DockPlacement::Center,
+                DockLayout::tabs().panel(chart.clone()),
                 window,
                 cx,
             );
@@ -52,6 +61,7 @@ impl QuantApp {
             state: store,
             dock_area,
             watchlist,
+            chart,
             _subscription,
         }
     }
