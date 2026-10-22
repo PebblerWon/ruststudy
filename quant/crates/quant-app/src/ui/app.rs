@@ -42,22 +42,6 @@ impl QuantApp {
         let (dock_area, dock_skin) = DockSkin::dock_area("rustquant", Some(1), window, cx);
         let watchlist = cx.new(|cx| WatchlistPanel::new(window, cx, store.clone()));
         let chart = cx.new(|cx| ChartPanel::new(window, cx));
-
-        let symbol_state = cx.new(|cx| {
-            SelectState::new(
-                vec![
-                    "Rust".to_string(),
-                    "TypeScript".to_string(),
-                    "Go".to_string(),
-                    "Python".to_string(),
-                    "JavaScript".to_string(),
-                ],
-                None,
-                window,
-                cx,
-            )
-        });
-
         dock_area.update(cx, |area, cx| {
             area.set_dock(
                 base::dock::DockPlacement::Left,
@@ -73,6 +57,21 @@ impl QuantApp {
             );
             // area.set_center(DockLayout::h_split(), window, cx);
         });
+        let symbol_state = cx.new(|cx| {
+            SelectState::new(
+                vec![
+                    "Rust".to_string(),
+                    "TypeScript".to_string(),
+                    "Go".to_string(),
+                    "Python".to_string(),
+                    "JavaScript".to_string(),
+                ],
+                None,
+                window,
+                cx,
+            )
+        });
+
         let _subscription = cx.observe(&store, |_, _, cx| cx.notify());
         QuantApp {
             state: store,
@@ -119,7 +118,7 @@ impl QuantApp {
         let state = self.state.read(cx);
         let last_update = state
             .last_update_time
-            .and_then(chrono::DateTime::from_timestamp_millis)
+            .and_then(|t| chrono::DateTime::from_timestamp(t, 0))
             .map(|dt| dt.format("%H:%M:%S").to_string())
             .unwrap_or_default();
         h_flex()
@@ -135,13 +134,17 @@ impl QuantApp {
             .child(format!("更新： {}", last_update))
             .child(format!("K 线: {} 条", 12))
     }
+
+    fn render_dock(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.dock_area.clone()
+    }
 }
 impl Render for QuantApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         v_flex()
             .size_full()
             .child(self.render_toolbar(window, cx))
-            .child(self.dock_area.clone())
+            .child(self.render_dock(window, cx))
             .child(self.render_status_bar(window, cx))
     }
 }
