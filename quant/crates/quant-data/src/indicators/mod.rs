@@ -1,9 +1,12 @@
-mod ema;
-mod sma;
-#[derive(Debug, Clone)]
+pub mod ema;
+pub mod sma;
+
+pub use ema::Ema;
+pub use sma::Sma;
 
 /// 指标计算结果
 /// 支持单值指标（SMA/EMA/RSI）和多值指标（MACD/布林带）
+#[derive(Debug, Clone)]
 pub enum IndicatorOutput {
     /// 单值序列（每个时间点对应一个 f64）
     /// 长度与输入相同，前 period-1 个值为 f64::NAN
