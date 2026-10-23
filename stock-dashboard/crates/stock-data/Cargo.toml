@@ -1,0 +1,10 @@
+[package]
+name = "stock-data"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "stock_data"
+path = "src/lib.rs"
+
+[dependencies]

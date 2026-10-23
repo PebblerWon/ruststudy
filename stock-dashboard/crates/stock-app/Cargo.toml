@@ -1,0 +1,24 @@
+[package]
+name = "stock-app"
+version = "0.1.0"
+edition = "2024"
+description = "RustQuant 桌面应用：gpui + gpui-kit GUI、回测引擎、策略框架"
+
+[dependencies]
+# 项目内部 crate
+stock-data = { path = "../stock-data" }
+# GUI：gpui-kit 重导出全部 GPUI API（use gpui_kit::*; 即可）
+# 严禁直接添加 gpui 依赖——与 gpui-kit 是两条不兼容的发布线
+gpui-kit = { version = "0.8.0", features = ["gpui-fast"] }
+
+# 继承 workspace 依赖
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+rand = "0.8.5"
+[dev-dependencies]
+gpui-devtools = "0.5"
