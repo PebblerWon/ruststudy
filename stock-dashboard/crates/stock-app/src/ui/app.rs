@@ -8,6 +8,9 @@ use gpui_kit::component::{Icon, IconName};
 use gpui_kit::prelude::FluentBuilder as _;
 
 use gpui_kit::*;
+
+use crate::ui::overview_panel::OverviewPanel;
+use crate::ui::ranklist_panel::RanklistPanel;
 pub struct StockAppState {}
 
 impl StockAppState {
@@ -16,27 +19,45 @@ impl StockAppState {
     }
 }
 
-pub struct StockApp {
-    collapsed: bool,
-    description: String,
-    menus: Vec<StockAppMenuItem>,
+#[derive(Clone)]
+pub enum AppPanel {
+    Overview(Entity<OverviewPanel>),
+    Ranklist(Entity<RanklistPanel>),
 }
+
 pub struct StockAppMenuItem {
     label: String,
+    key: String,
+    /// 关联的面板，任意实现 Render 的 View Entity
+    panel: AppPanel,
 }
+pub struct StockApp {
+    collapsed: bool,
+    active_key: String,
+
+    menus: Vec<StockAppMenuItem>,
+}
+
 impl StockApp {
-    pub fn new() -> Self {
+    pub fn new(_window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let overview_panel = cx.new(|cx| OverviewPanel::new());
+        let ranklist_panel = cx.new(|cx| RanklistPanel::new());
+
         let menus = vec![
             StockAppMenuItem {
                 label: "总览".into(),
+                key: "overview".into(),
+                panel: AppPanel::Overview(overview_panel),
             },
             StockAppMenuItem {
                 label: "榜单".into(),
+                key: "ranklist".into(),
+                panel: AppPanel::Ranklist(ranklist_panel),
             },
         ];
         Self {
             collapsed: false,
-            description: menus[0].label.clone(),
+            active_key: menus[0].key.clone(),
             menus,
         }
     }
@@ -47,6 +68,21 @@ impl StockApp {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let icon_collapsed = self.collapsed;
+
+        let content_panel = self
+            .menus
+            .iter()
+            .find(|item| item.key == self.active_key)
+            .map(|i| i.panel.clone());
+
+        let content_elm = if let Some(panel) = content_panel {
+            match panel {
+                AppPanel::Overview(v) => v.clone().into_any_element(),
+                AppPanel::Ranklist(v) => v.clone().into_any_element(),
+            }
+        } else {
+            div().child("开发中...").into_any_element()
+        };
 
         v_flex()
             .h_full()
@@ -71,7 +107,7 @@ impl StockApp {
                     .border_1()
                     .border_color(cx.theme().border)
                     .p_2()
-                    .child(self.description.clone()),
+                    .child(content_elm),
             )
     }
 
@@ -82,26 +118,16 @@ impl StockApp {
     ) -> SidebarGroup<SidebarMenu> {
         SidebarGroup::new("A股看板").child(SidebarMenu::new().children(self.menus.iter().map(
             |menu_item| {
-                let label = menu_item.label.clone();
+                let key = menu_item.key.clone();
                 SidebarMenuItem::new(&menu_item.label)
                     .icon(IconName::LayoutDashboard)
-                    .active(self.description == label)
+                    .active(self.active_key == key)
                     .on_click(cx.listener(move |this, _, _, cx| {
-                        this.description = label.clone();
+                        this.active_key = key.clone();
                         cx.notify();
                     }))
             },
         )))
-        // SidebarGroup::new("A股看板").child(
-        //     SidebarMenu::new().child(
-        //         SidebarMenuItem::new("总览")
-        //             .icon(IconName::LayoutDashboard)
-        //             .on_click(cx.listener(|this, _, _, cx| {
-        //                 this.description = "总览".into();
-        //                 cx.notify();
-        //             })),
-        //     ),
-        // )
     }
 }
 impl Render for StockApp {

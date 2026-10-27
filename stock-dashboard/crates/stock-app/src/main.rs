@@ -1,5 +1,6 @@
 use gpui_kit::*;
 mod ui;
+mod utils;
 
 use ui::app::StockApp;
 fn main() {
@@ -30,7 +31,7 @@ fn main() {
                 ..WindowOptions::default()
             },
             cx,
-            |_, cx| cx.new(|_| StockApp::new()),
+            |window, cx| cx.new(|cx| StockApp::new(window, cx)),
         )
         .expect("Failed to open window");
     });
