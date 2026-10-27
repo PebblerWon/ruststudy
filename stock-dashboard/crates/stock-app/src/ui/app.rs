@@ -36,7 +36,7 @@ impl StockApp {
         ];
         Self {
             collapsed: false,
-            description: "".into(),
+            description: menus[0].label.clone(),
             menus,
         }
     }
@@ -82,11 +82,14 @@ impl StockApp {
     ) -> SidebarGroup<SidebarMenu> {
         SidebarGroup::new("A股看板").child(SidebarMenu::new().children(self.menus.iter().map(
             |menu_item| {
-                SidebarMenuItem::new(menu_item.label.clone()).icon(IconName::LayoutDashboard)
-                // .on_click(cx.listener(|this, _, _, cx| {
-                //     this.description = menu_item.label.clone().into();
-                //     cx.notify();
-                // }))
+                let label = menu_item.label.clone();
+                SidebarMenuItem::new(&menu_item.label)
+                    .icon(IconName::LayoutDashboard)
+                    .active(self.description == label)
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.description = label.clone();
+                        cx.notify();
+                    }))
             },
         )))
         // SidebarGroup::new("A股看板").child(
