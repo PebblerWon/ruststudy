@@ -8,3 +8,14 @@ name = "stock_data"
 path = "src/lib.rs"
 
 [dependencies]
+tokio = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+wiremock = "0.6"        # 或 tokio-test + 手工 mock transport
+tempfile = "3"
