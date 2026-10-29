@@ -17,8 +17,9 @@ pub struct Quote {
     pub high: f64,
     pub low: f64,
     pub pre_close: f64,
-    pub total_mv: f64, // 亿元
-    pub circ_mv: f64,  // 亿元
+    pub total_mv: f64,      // 亿元
+    pub circ_mv: f64,       // 亿元
+    pub is_suspended: bool, // 是否停牌
 }
 
 /// 指数快照
@@ -78,7 +79,7 @@ pub struct MarketSnapshot {
 }
 
 /// K 线周期（东财无 4h，刻意不设 H4）
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq)]
 pub enum Interval {
     M1,
     M5,

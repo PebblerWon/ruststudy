@@ -510,16 +510,22 @@ pub fn parse_kline_line(line: &str, interval: Interval) -> Result<Kline> {
     }
 
     // 时间解析：日线 "YYYY-MM-DD"（补 09:30 开盘），分钟线 "YYYY-MM-DD HH:MM"
-    let (open_dt, close_dt) = if interval.minutes() > 0 {
+    // 两个分支都显式产出 (NaiveDateTime, NaiveDateTime)，避免 if/else 类型不一致
+    let (open_dt, close_dt): (NaiveDateTime, NaiveDateTime) = if interval.minutes() > 0 {
         let t = NaiveDateTime::parse_from_str(p[0], "%Y-%m-%d %H:%M")
             .map_err(|e| DataError::Api(format!("时间解析失败 {line}: {e}")))?;
-        let c = t + chrono::Duration::minutes(interval.minutes());
-        (t, c)
+        (t, t + chrono::Duration::minutes(interval.minutes()))
     } else {
         let d = NaiveDate::parse_from_str(p[0], "%Y-%m-%d")
             .map_err(|e| DataError::Api(format!("日期解析失败 {line}: {e}")))?;
         // 日/周线：open 取当日 09:30，close 取 15:00
-        (d.and_hms_opt(9, 30, 0).unwrap(), d.and_hms_opt(15, 0, 0).unwrap())
+        let open = d
+            .and_hms_opt(9, 30, 0)
+            .ok_or_else(|| DataError::Api(format!("无效日期 {line}")))?;
+        let close = d
+            .and_hms_opt(15, 0, 0)
+            .ok_or_else(|| DataError::Api(format!("无效日期 {line}")))?;
+        (open, close)
     };
 
     let open: f64 = p[1].parse().unwrap_or(0.0);
