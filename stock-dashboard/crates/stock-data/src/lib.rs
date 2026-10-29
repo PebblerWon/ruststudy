@@ -2,6 +2,5 @@ pub mod common;
 pub mod data;
 
 pub use common::{error::DataError, models::*};
-fn main() {
-    println!("Hello, world!");
-}
+pub use data::eastmoney::EastmoneyClient;
+pub use data::polling::{PollingHandle, spawn_polling};

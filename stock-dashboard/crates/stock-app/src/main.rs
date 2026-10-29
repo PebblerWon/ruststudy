@@ -1,4 +1,5 @@
 use gpui_kit::*;
+mod bridge;
 mod ui;
 mod utils;
 

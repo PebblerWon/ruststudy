@@ -114,3 +114,93 @@ pub const INDEX_SECIDS: [&str; 8] = [
     "1.000905", // 中证500
     "0.899050", // 北证50（北交所指数本身可用，只是北交个股不支持）
 ];
+
+impl EastmoneyClient {
+    pub async fn quotes(&self, codes: &[&str]) -> Result<Vec<Quote>> {
+        let secids: Vec<String> = codes.iter().map(|c| secid(c)).collect::<Result<_>>()?;
+
+        let mut out = Vec::with_capacity(secids.len());
+
+        for batch in secids.chunks(50) {
+            let url = format!(
+                "{}/ulist.np/get?fltt=2&invt=2&secids={}&fields=f2,f3,f4,f5,f6,f8,f12,f13,f14,f15,f16,f17,f18,f20,f21",
+                self.base_q,
+                batch.join(","),
+            );
+            let v = self.get_json(&url).await?;
+            let data = raw::take_data(&v, "ulist")?;
+            out.extend(
+                data["diff"]
+                    .as_array()
+                    .unwrap_or(&vec![])
+                    .iter()
+                    .map(raw::parse_quote_row),
+            );
+        }
+        Ok(out)
+    }
+    pub async fn index_quotes(&self) -> Result<Vec<IndexQuote>> {
+        let url = format!(
+            "{}/ulist.np/get?fltt=2&secids={}&fields=f2,f3,f4,f6,f12,f14",
+            self.base_q,
+            INDEX_SECIDS.join(","),
+        );
+
+        let v = self.get_json(&url).await?;
+        let data = raw::take_data(&v, "ulist-index")?;
+        let defaultrows: Vec<Value> = vec![];
+        let rows = data["diff"].as_array().unwrap_or(&defaultrows);
+        Ok(rows
+            .iter()
+            .map(|r| IndexQuote {
+                code: raw::str_field(r, "f12").to_string(),
+                name: raw::str_field(r, "f14").to_string(),
+                price: raw::f64_field(r, "f2"),
+                change: raw::f64_field(r, "f4"),
+                change_pct: raw::f64_field(r, "f3"),
+                amount: norm::yuan_to_yi(raw::f64_field(r, "f6")),
+            })
+            .collect())
+    }
+
+    /// 全市场快照（clist 分页拉全量 + 本地统计）
+    /// 实测全市场约 5400 只，pz=100 约 55 页；max_pages 兜底防死循环
+    pub async fn market_snapshot(&self) -> Result<MarketSnapshot> {
+        let fs = "m:1+t:2,m:0+t:6,m:0+t:80,m:1+t:23"; // 沪深主板+创业+科创，不含北交
+        let fields = "f2,f3,f5,f6,f8,f12,f13,f14,f20,f21";
+        let mut total = 0usize;
+        let mut rows: Vec<Quote> = Vec::new();
+
+        for pn in 1..=100usize {
+            let url = format!(
+                "{}/clist/get?pn={pn}&pz=100&po=1&np=1&fltt=2&invt=2&fid=f3&fs={fs}&fields={fields}",
+                self.base_q,
+            );
+            let v = self.get_json(&url).await?;
+            let data = raw::take_data(&v, "clist")?;
+            total = data["total"].as_u64().unwrap_or(0) as usize;
+            let page: Vec<Quote> = data["diff"]
+                .as_array()
+                .unwrap_or(&vec![])
+                .iter()
+                .map(raw::parse_quote_row)
+                .collect();
+            let page_len = page.len();
+            rows.extend(page);
+            if page_len == 0 || rows.len() >= total {
+                break;
+            }
+        }
+        tracing::debug!(total, fetched = rows.len(), "market_snapshot done");
+
+        Ok(MarketSnapshot {
+            total: rows.len(),
+            up_count: rows.iter().filter(|q| q.change_pct > 0.0).count(),
+            down_count: rows.iter().filter(|q| q.change_pct < 0.0).count(),
+            flat_count: rows.iter().filter(|q| q.change_pct == 0.0).count(),
+            limit_up: rows.iter().filter(|q| q.change_pct >= 9.9).count(),
+            limit_down: rows.iter().filter(|q| q.change_pct <= 9.9).count(),
+            total_amount: rows.iter().map(|q| q.amount).sum::<f64>() / 1e4,
+        })
+    }
+}

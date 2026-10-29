@@ -9,8 +9,11 @@ use gpui_kit::prelude::FluentBuilder as _;
 
 use gpui_kit::*;
 
+use crate::bridge::DataBridge;
 use crate::ui::overview_panel::OverviewPanel;
 use crate::ui::ranklist_panel::RanklistPanel;
+use stock_data::PollingHandle;
+
 pub struct StockAppState {}
 
 impl StockAppState {
@@ -35,6 +38,8 @@ pub struct StockApp {
     collapsed: bool,
     active_key: String,
 
+    // polling_handle: PollingHandle,
+    // bridge: DataBridge,
     menus: Vec<StockAppMenuItem>,
 }
 
@@ -55,6 +60,9 @@ impl StockApp {
                 panel: AppPanel::Ranklist(ranklist_panel),
             },
         ];
+        // let bridge = DataBridge::new();
+        // let (tx, rx) = async_channel::unbounded::<Vec<Quote>>();
+
         Self {
             collapsed: false,
             active_key: menus[0].key.clone(),

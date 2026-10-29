@@ -149,6 +149,8 @@ CandlestickChart::new("kline")
 
 ## 2.7 轮询集成（Phase 3，T3.2/T3.3）
 
+> ⚠️ 本节下方示例仅示意轮询节奏；**直接在 `cx.spawn` 里 `.await` client 方法在 gpui executor 上不可行**（reqwest 依赖 tokio reactor，会 panic）。实际桥接方案（tokio Runtime + block_on / async-channel）见 [03_integration.md §3.3](03_integration.md)，以该文档为准。
+
 ```rust
 // AppState::new 中启动（或独立 task，cx.background_spawn）
 cx.spawn(async move |this, cx| {
