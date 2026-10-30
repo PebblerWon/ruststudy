@@ -10,7 +10,7 @@ stock-data = { path = "../stock-data" }
 # GUI：gpui-kit 重导出全部 GPUI API（use gpui_kit::*; 即可）
 # 严禁直接添加 gpui 依赖——与 gpui-kit 是两条不兼容的发布线
 gpui-kit = { version = "0.8.0", features = ["gpui-fast"] }
-async_channel = "2"
+async-channel = "2"
 
 # 继承 workspace 依赖
 tokio = { workspace = true }

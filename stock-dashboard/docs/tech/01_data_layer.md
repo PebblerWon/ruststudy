@@ -10,16 +10,16 @@
 
 ### 模块划分与职责
 
-| 文件 | 职责 | 关键类型/函数 | 对应任务 |
-|------|------|--------------|---------|
-| `common/error.rs` | 统一错误类型 | `DataError`、`Result<T>` | T1.2 |
-| `common/models.rs` | 归一后的领域模型 | `Quote` `IndexQuote` `Kline` `TimelinePoint` `MarketSnapshot` `Interval` `Adjust` | T1.2 |
-| `common/trading_hours.rs` | 交易时段判断（纯函数） | `TradingPhase`、`phase()`、`now_shanghai()` | T3.1（定义在 Phase 1 建） |
-| `data/eastmoney_types.rs` | 东财原始响应解析 | `take_data()`、`f64_field()` 等 helper、`parse_quote_row()`、kline/分时 CSV 解析 | T1.4 |
-| `data/normalize.rs` | 单位归一（元→万/亿、手→股） | `yuan_to_wan()` 等 | T1.4 |
-| `data/eastmoney.rs` | HTTP 客户端 | `EastmoneyClient`、`TokenBucket`、`secid()` | T1.3/T1.4 |
-| `data/cache.rs` | 内存 TTL 缓存 | `TtlCache<V>` | T1.5 |
-| `data/polling.rs` | 轮询调度（时段感知 + 退避） | `spawn_polling()`、`PollingHandle` | T3.1 |
+| 文件                      | 职责                        | 关键类型/函数                                                                     | 对应任务                  |
+| ------------------------- | --------------------------- | --------------------------------------------------------------------------------- | ------------------------- |
+| `common/error.rs`         | 统一错误类型                | `DataError`、`Result<T>`                                                          | T1.2                      |
+| `common/models.rs`        | 归一后的领域模型            | `Quote` `IndexQuote` `Kline` `TimelinePoint` `MarketSnapshot` `Interval` `Adjust` | T1.2                      |
+| `common/trading_hours.rs` | 交易时段判断（纯函数）      | `TradingPhase`、`phase()`、`now_shanghai()`                                       | T3.1（定义在 Phase 1 建） |
+| `data/eastmoney_types.rs` | 东财原始响应解析            | `take_data()`、`f64_field()` 等 helper、`parse_quote_row()`、kline/分时 CSV 解析  | T1.4                      |
+| `data/normalize.rs`       | 单位归一（元→万/亿、手→股） | `yuan_to_wan()` 等                                                                | T1.4                      |
+| `data/eastmoney.rs`       | HTTP 客户端                 | `EastmoneyClient`、`TokenBucket`、`secid()`                                       | T1.3/T1.4                 |
+| `data/cache.rs`           | 内存 TTL 缓存               | `TtlCache<V>`                                                                     | T1.5                      |
+| `data/polling.rs`         | 轮询调度（时段感知 + 退避） | `spawn_polling()`、`PollingHandle`                                                | T3.1                      |
 
 ### 依赖关系与数据流
 
@@ -484,10 +484,30 @@ pub fn parse_quote_row(row: &Value) -> Quote {
 实测响应样例（可直接做 fixture）：
 
 ```json
-{"rc":0,"data":{"total":3488,"diff":[
-  {"f2":3.03,"f3":10.18,"f5":505496,"f6":152967019.1,"f8":6.77,
-   "f12":"002535","f13":0,"f14":"林州重机","f15":3.03,"f16":3.0,
-   "f17":3.01,"f18":2.75,"f20":2429099714,"f21":2261402731}]}}
+{
+  "rc": 0,
+  "data": {
+    "total": 3488,
+    "diff": [
+      {
+        "f2": 3.03,
+        "f3": 10.18,
+        "f5": 505496,
+        "f6": 152967019.1,
+        "f8": 6.77,
+        "f12": "002535",
+        "f13": 0,
+        "f14": "林州重机",
+        "f15": 3.03,
+        "f16": 3.0,
+        "f17": 3.01,
+        "f18": 2.75,
+        "f20": 2429099714,
+        "f21": 2261402731
+      }
+    ]
+  }
+}
 ```
 
 ### 1.5.3 kline CSV 解析
@@ -561,9 +581,18 @@ pub fn mark_last_bar_open(klines: &mut [Kline], now_ms: i64) {
 实测响应样例（前复权，注意 2001 年早期数据为负——解析不做正数校验）：
 
 ```json
-{"data":{"code":"600519","market":1,"name":"贵州茅台","dktotal":6027,
- "klines":["2024-01-02,1685.00,1685.90,1698.00,1670.11,30726,5172858000.00,1.72,-0.33,-5.62,0.24",
-           "2001-08-27,-312.68,-312.47,-312.03,-313.01,406318,1410347000.00,-0.31,0.26,0.83,56.83"]}}
+{
+  "data": {
+    "code": "600519",
+    "market": 1,
+    "name": "贵州茅台",
+    "dktotal": 6027,
+    "klines": [
+      "2024-01-02,1685.00,1685.90,1698.00,1670.11,30726,5172858000.00,1.72,-0.33,-5.62,0.24",
+      "2001-08-27,-312.68,-312.47,-312.03,-313.01,406318,1410347000.00,-0.31,0.26,0.83,56.83"
+    ]
+  }
+}
 ```
 
 ### 1.5.4 trends2 分时解析
@@ -588,9 +617,16 @@ pub fn parse_timeline_line(line: &str) -> Option<TimelinePoint> {
 实测响应样例：
 
 ```json
-{"data":{"code":"600519","preClose":1318.49,
- "trends":["2026-10-23 09:30,1311.84,1311.84,1311.84,1311.84,1049,137612016.00,1311.840",
-           "2026-10-23 09:31,1311.50,1321.00,1323.65,1310.00,986,129903055.00,1314.441"]}}
+{
+  "data": {
+    "code": "600519",
+    "preClose": 1318.49,
+    "trends": [
+      "2026-10-23 09:30,1311.84,1311.84,1311.84,1311.84,1049,137612016.00,1311.840",
+      "2026-10-23 09:31,1311.50,1321.00,1323.65,1310.00,986,129903055.00,1314.441"
+    ]
+  }
+}
 ```
 
 ### 1.5.5 normalize.rs — 单位归一
@@ -872,17 +908,19 @@ impl<V: Clone> TtlCache<V> {
 
 TTL 分级（client 持有一个 `TtlCache<Value>` 存原始响应即可，单位换算幂等）：
 
-| key 前缀 | TTL |
-|----------|-----|
-| `ulist:{secids}` | 5s |
+| key 前缀                          | TTL   |
+| --------------------------------- | ----- |
+| `ulist:{secids}`                  | 5s    |
 | `kline:{secid}:{klt}:{fqt}:{beg}` | 10min |
-| `clist:snapshot` | 60s |
+| `clist:snapshot`                  | 60s   |
 
 ### 1.6.3 polling.rs — 轮询服务（Phase 1 建骨架，Phase 3 接 UI）
 
 ```rust
 // src/data/polling.rs
+use crate::common::error::DataError;
 use crate::common::trading_hours::{self, TradingPhase};
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -896,12 +934,16 @@ impl PollingHandle {
     pub fn stop(&self) { let _ = self.stop_tx.send(true); }
 }
 
-/// 启动轮询任务。
-/// `on_quotes` 在 tokio 线程被调用，Phase 3 中它内部做 cx.update + cx.notify。
+/// 启动轮询任务（通用框架：轮询什么由 fetch 决定）。
+/// - `fetch`：每个 tick 调用一次，产出本次要执行的异步取数调用（如 client.quotes / klines）
+/// - `on_data`：成功后在 tokio 线程被调用，Phase 3 中内部做 tx.try_send → gpui 唤醒
 /// 失败退避：1s→2s→4s→…→30s 封顶，成功后恢复时段标准间隔。
-pub fn spawn_polling<F>(client: Arc<crate::data::eastmoney::EastmoneyClient>, on_quotes: F) -> PollingHandle
+pub fn spawn_polling<T, Fut, F, G>(fetch: G, on_data: F) -> PollingHandle
 where
-    F: Fn(Vec<crate::common::models::Quote>) + Send + 'static,
+    G: Fn() -> Fut + Send + 'static,                       // 每 tick 调一次，产出新 future
+    Fut: Future<Output = Result<T, DataError>> + Send + 'static,
+    F: Fn(T) + Send + 'static,                             // 成功后怎么消费
+    T: Send + 'static,
 {
     let (stop_tx, stop_rx) = watch::channel(false);
     tokio::spawn(async move {
@@ -918,9 +960,8 @@ where
             };
             tokio::time::sleep(Duration::from_secs(period)).await;
 
-            // TODO(Phase 3)：这里换成 watchlist 的 codes
-            match client.quotes(&["600519", "000001"]).await {
-                Ok(qs) => { backoff_secs = 0; on_quotes(qs); }
+            match fetch().await {
+                Ok(data) => { backoff_secs = 0; on_data(data); }
                 Err(e) => {
                     backoff_secs = (backoff_secs * 2).max(1).min(30);
                     tracing::warn!(error = %e, backoff_secs, "polling failed");
@@ -934,6 +975,7 @@ where
 
 设计点：
 
+- **泛化模式 `Fn() -> Fut`（2026-10-30 定稿）**：稳定版 Rust 没有 async 闭包，用「返回 future 的闭包」表达"每个 tick 要执行的异步调用"。三个约束：fetch 必须是 `Fn`（循环多次调用，不能 move 捕获物，只能 clone——`Arc::clone` 纳秒级）；返回的 Fut 必须 `'static`（`tokio::spawn` 要求），async move 块内自持 Arc 即可满足；错误统一走 `Result<_, DataError>` 进退避分支。行情场景的封装（start_polling_quotes）见 [03_integration.md §3.3.2](03_integration.md)，换数据源 = 换一个 fetch 闭包
 - **为什么不用 `interval` 而用 `sleep`**：时段切换（盘中 5s ↔ 收盘 60s）和退避都需要动态改周期，`tokio::interval` 改周期要用 `MissedTickBehavior` 绕，直接 sleep 更直白
 - **退避放在 sleep 侧而不是重试侧**：失败后下一轮直接等更久，天然满足"失败→降频"
 - 关闭用 `watch` channel 而非引入 `tokio_util::CancellationToken` 新依赖；Phase 3 集成 gpui 时若 quant 已有 CancellationToken 经验可替换
@@ -1049,14 +1091,14 @@ mod kline_tests {
 
 ### 1.7.2 fixture 文件（放 `stock-data/tests/fixtures/eastmoney/`）
 
-| 文件 | 内容来源 |
-|------|---------|
-| `ulist_quotes.json` | §1.5.2 样例（林州重机/榕基软件两行） |
+| 文件                   | 内容来源                                             |
+| ---------------------- | ---------------------------------------------------- |
+| `ulist_quotes.json`    | §1.5.2 样例（林州重机/榕基软件两行）                 |
 | `ulist_suspended.json` | 自造停牌行（f2/f3… 均为 `"-"`）→ 断言 `is_suspended` |
-| `clist_page1.json` | 实测 clist 一页 + `"total":3488` → 断言分页终止条件 |
-| `kline_qfq.txt` | 茅台日线 CSV 若干行（含 2024 正价行 + 2001 负价行） |
-| `kline_null_data.json` | `{"data":null}` → 断言返回 `Err(Api)` 或空 |
-| `trends.json` | §1.5.4 样例 → 断言 preClose 与首点均价 |
+| `clist_page1.json`     | 实测 clist 一页 + `"total":3488` → 断言分页终止条件  |
+| `kline_qfq.txt`        | 茅台日线 CSV 若干行（含 2024 正价行 + 2001 负价行）  |
+| `kline_null_data.json` | `{"data":null}` → 断言返回 `Err(Api)` 或空           |
+| `trends.json`          | §1.5.4 样例 → 断言 preClose 与首点均价               |
 
 ### 1.7.3 wiremock 集成测试（`stock-data/tests/http_tests.rs`）
 
@@ -1117,13 +1159,13 @@ async fn smoke_index_quotes() {
 
 ### 1.7.5 测试清单汇总
 
-| 对象 | 断言要点 | 位置 |
-|------|---------|------|
-| `secid()` | 沪/深映射、北交拒绝、长度与字符校验 | eastmoney.rs 单测 |
-| `normalize` | 元→万/亿、0/负值 | normalize.rs 单测 |
-| `parse_kline_line` | 字段顺序（收在高位前）、手→股、负价、分钟 close_time | eastmoney_types.rs 单测 |
-| `parse_quote_row` | 归一正确、停牌行 `is_suspended` | wiremock + fixture |
-| `phase()` | §1.6.1 边界表 + 周末 | trading_hours.rs 单测 |
-| 分页终止 | `total` 达到 / 空页 / `max_pages` 兜底 | wiremock（构造两页 fixture） |
-| 空响应 | 200 + 空 body → `Err(Api)`（实测防风控回归） | wiremock（空 body fixture） |
-| 真实接口 | OHLC 有序、指数 8 条 | `#[ignore]` smoke test |
+| 对象               | 断言要点                                             | 位置                         |
+| ------------------ | ---------------------------------------------------- | ---------------------------- |
+| `secid()`          | 沪/深映射、北交拒绝、长度与字符校验                  | eastmoney.rs 单测            |
+| `normalize`        | 元→万/亿、0/负值                                     | normalize.rs 单测            |
+| `parse_kline_line` | 字段顺序（收在高位前）、手→股、负价、分钟 close_time | eastmoney_types.rs 单测      |
+| `parse_quote_row`  | 归一正确、停牌行 `is_suspended`                      | wiremock + fixture           |
+| `phase()`          | §1.6.1 边界表 + 周末                                 | trading_hours.rs 单测        |
+| 分页终止           | `total` 达到 / 空页 / `max_pages` 兜底               | wiremock（构造两页 fixture） |
+| 空响应             | 200 + 空 body → `Err(Api)`（实测防风控回归）         | wiremock（空 body fixture）  |
+| 真实接口           | OHLC 有序、指数 8 条                                 | `#[ignore]` smoke test       |

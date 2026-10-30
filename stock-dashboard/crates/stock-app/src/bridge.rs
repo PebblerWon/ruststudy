@@ -1,6 +1,5 @@
 use std::sync::Arc;
 use stock_data::{EastmoneyClient, PollingHandle, spawn_polling};
-
 pub struct DataBridge {
     rt: tokio::runtime::Runtime,
     pub client: Arc<EastmoneyClient>,
@@ -14,6 +13,7 @@ impl DataBridge {
             .build()?;
 
         let client = Arc::new(EastmoneyClient::new()?);
+
         Ok(Self { rt, client })
     }
 
@@ -25,7 +25,7 @@ impl DataBridge {
 
     /// 启动轮询：任务跑在 tokio runtime 内，结果经 tx 推给 UI。
     /// 返回句柄由 UI 侧保存（窗口关闭/退出时 stop）。
-    pub fn start_polling(
+    pub fn start_polling_quotes(
         &self,
         tx: async_channel::Sender<Vec<stock_data::Quote>>,
     ) -> PollingHandle {
@@ -33,9 +33,38 @@ impl DataBridge {
         // spawn_polling 内部 tokio::spawn，必须在 runtime 上下文里调用
 
         self.rt.block_on(async move {
-            spawn_polling(client, move |quotes| {
-                let _ = tx.try_send(quotes);
-            })
+            spawn_polling(
+                move || {
+                    let client = client.clone();
+                    let codes = vec!["000001", "600000"];
+                    async move { client.quotes(&codes).await }
+                },
+                move |quotes| {
+                    let _ = tx.try_send(quotes);
+                },
+            )
+        })
+    }
+
+    /// 启动轮询：任务跑在 tokio runtime 内，结果经 tx 推给 UI。
+    /// 返回句柄由 UI 侧保存（窗口关闭/退出时 stop）。
+    pub fn start_polling_index_quotes(
+        &self,
+        tx: async_channel::Sender<Vec<stock_data::IndexQuote>>,
+    ) -> PollingHandle {
+        let client = self.client.clone();
+        // spawn_polling 内部 tokio::spawn，必须在 runtime 上下文里调用
+
+        self.rt.block_on(async move {
+            spawn_polling(
+                move || {
+                    let client = client.clone();
+                    async move { client.index_quotes().await }
+                },
+                move |data| {
+                    let _ = tx.try_send(data);
+                },
+            )
         })
     }
 }

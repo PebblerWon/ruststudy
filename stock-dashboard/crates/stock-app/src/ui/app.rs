@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::sidebar::{
@@ -12,7 +14,7 @@ use gpui_kit::*;
 use crate::bridge::DataBridge;
 use crate::ui::overview_panel::OverviewPanel;
 use crate::ui::ranklist_panel::RanklistPanel;
-use stock_data::PollingHandle;
+use stock_data::{PollingHandle, Quote};
 
 pub struct StockAppState {}
 
@@ -38,14 +40,15 @@ pub struct StockApp {
     collapsed: bool,
     active_key: String,
 
-    // polling_handle: PollingHandle,
-    // bridge: DataBridge,
     menus: Vec<StockAppMenuItem>,
+    /// 持有 bridge：保住 tokio runtime 生命周期，
+    /// 否则 gpui 丢弃启动闭包后 Arc 归零，runtime 被提前 drop
+    _bridge: Arc<DataBridge>,
 }
 
 impl StockApp {
-    pub fn new(_window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let overview_panel = cx.new(|cx| OverviewPanel::new());
+    pub fn new(_window: &mut Window, cx: &mut Context<Self>, bridge: Arc<DataBridge>) -> Self {
+        let overview_panel = cx.new(|cx| OverviewPanel::new(bridge.clone(), cx));
         let ranklist_panel = cx.new(|cx| RanklistPanel::new());
 
         let menus = vec![
@@ -60,13 +63,12 @@ impl StockApp {
                 panel: AppPanel::Ranklist(ranklist_panel),
             },
         ];
-        // let bridge = DataBridge::new();
-        // let (tx, rx) = async_channel::unbounded::<Vec<Quote>>();
 
         Self {
             collapsed: false,
             active_key: menus[0].key.clone(),
             menus,
+            _bridge: bridge,
         }
     }
 

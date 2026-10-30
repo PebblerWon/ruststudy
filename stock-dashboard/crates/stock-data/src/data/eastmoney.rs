@@ -52,14 +52,8 @@ impl EastmoneyClient {
 
     async fn get_json(&self, url: &str) -> Result<Value> {
         self.limiter.acquire().await;
-        let text = self
-            .http
-            .get(url)
-            .send()
-            .await?
-            .error_for_status()?
-            .text()
-            .await?;
+        let text = self.http.get(url).send().await?;
+        let text = text.error_for_status()?.text().await?;
 
         if text.trim().is_empty() {
             return Err(DataError::Api(format!("接口返回空响应: {url}")));
@@ -104,15 +98,13 @@ pub fn secid(code: &str) -> Result<String> {
 }
 
 /// 8 大指数 secid 常量（总览页顺序即展示顺序）
-pub const INDEX_SECIDS: [&str; 8] = [
+pub const INDEX_SECIDS: [&str; 6] = [
     "1.000001", // 上证指数
     "0.399001", // 深证成指
     "0.399006", // 创业板指
     "1.000688", // 科创50
     "1.000300", // 沪深300
     "1.000016", // 上证50
-    "1.000905", // 中证500
-    "0.899050", // 北证50（北交所指数本身可用，只是北交个股不支持）
 ];
 
 impl EastmoneyClient {

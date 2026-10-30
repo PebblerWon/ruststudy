@@ -1,6 +1,6 @@
 use super::eastmoney::EastmoneyClient;
-use crate::Quote;
 use crate::common::trading_hours::{self, TradingPhase};
+use crate::{DataError, Quote, data};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
@@ -16,12 +16,12 @@ impl PollingHandle {
     }
 }
 
-/// 启动轮询任务。
-/// `on_quotes` 在 tokio 线程被调用，Phase 3 中它内部做 cx.update + cx.notify。
-/// 失败退避：1s→2s→4s→…→30s 封顶，成功后恢复时段标准间隔。
-pub fn spawn_polling<F>(client: Arc<EastmoneyClient>, on_quotes: F) -> PollingHandle
+pub fn spawn_polling<T, Fut, F, G>(fetch: G, on_data: F) -> PollingHandle
 where
-    F: Fn(Vec<Quote>) + Send + 'static,
+    G: Fn() -> Fut + Send + 'static,
+    T: Send + 'static,
+    Fut: Future<Output = Result<T, DataError>> + Send + 'static,
+    F: Fn(T) + Send + 'static,
 {
     let (stop_tx, stop_rx) = watch::channel(false);
 
@@ -44,18 +44,18 @@ where
                 60
             };
 
-            tokio::time::sleep(Duration::from_secs(period)).await;
-
-            match client.quotes(&["600519", "000001"]).await {
-                Ok(qs) => {
+            match fetch().await {
+                Ok(data) => {
                     backoff_secs = 0;
-                    on_quotes(qs);
+                    on_data(data);
                 }
                 Err(e) => {
                     backoff_secs = (backoff_secs * 2).max(1).min(30);
                     tracing::warn!(error = %e, backoff_secs, "polling failed");
                 }
             }
+
+            tokio::time::sleep(Duration::from_secs(period)).await;
         }
     });
     PollingHandle { stop_tx }

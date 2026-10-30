@@ -1,13 +1,21 @@
+use std::sync::Arc;
+
+use anyhow::{Error, Ok};
 use gpui_kit::*;
 mod bridge;
 mod ui;
 mod utils;
 
 use ui::app::StockApp;
-fn main() {
-    application().with_assets(assets::Assets).run(|cx| {
-        init(cx);
 
+use crate::bridge::DataBridge;
+fn main() -> Result<(), Error> {
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+    let bridge = Arc::new(DataBridge::new()?);
+    application().with_assets(assets::Assets).run(move |cx| {
+        init(cx);
         open_window(
             WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds {
@@ -32,8 +40,9 @@ fn main() {
                 ..WindowOptions::default()
             },
             cx,
-            |window, cx| cx.new(|cx| StockApp::new(window, cx)),
+            |window, cx| cx.new(|cx| StockApp::new(window, cx, bridge.clone())),
         )
         .expect("Failed to open window");
     });
+    Ok(())
 }

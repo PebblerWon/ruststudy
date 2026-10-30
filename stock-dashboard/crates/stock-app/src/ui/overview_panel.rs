@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use crate::{
+    bridge::DataBridge,
     ui::theme::{AppThemePalette, theme_palette},
     utils::format::format_wan_yi,
 };
@@ -8,6 +11,7 @@ use gpui_kit::{
     component::ActiveTheme,
     *,
 };
+use stock_data::{IndexQuote, PollingHandle};
 pub struct IndexSnapshot {
     pub code: String,         // 指数代码 000001.SH
     pub name: String,         // 指数名称：上证指数
@@ -15,7 +19,6 @@ pub struct IndexSnapshot {
     pub change: f64,          // 涨跌额（涨了多少点）
     pub change_pct: f64,      // 涨跌幅（小数，如0.025 = +2.5%）
     pub turnover_amount: f64, // 成交额
-    pub timestamp: i64,       // 行情时间戳
 }
 impl IndexSnapshot {
     pub fn new(
@@ -33,73 +36,50 @@ impl IndexSnapshot {
             change,
             change_pct,
             turnover_amount,
-            timestamp: 0,
         }
     }
 }
 pub struct OverviewPanel {
+    /// 持有 bridge：保住 tokio runtime 生命周期（同 StockApp._bridge）
+    _bridge: Arc<DataBridge>,
     snapshots: Vec<IndexSnapshot>,
+    polling_handle: PollingHandle,
 }
 impl OverviewPanel {
-    pub fn new() -> Self {
-        let now = Utc::now().timestamp_millis();
-        let snapshots = vec![
-            IndexSnapshot {
-                code: "000001.SH".to_string(),
-                name: "上证指数".to_string(),
-                last_price: 3328.74,
-                change: 18.32,
-                change_pct: 0.0055,
-                turnover_amount: 2689.42,
-                timestamp: now,
-            },
-            IndexSnapshot {
-                code: "399001.SZ".to_string(),
-                name: "深证成指".to_string(),
-                last_price: 10756.21,
-                change: 76.54,
-                change_pct: 0.0072,
-                turnover_amount: 3142.77,
-                timestamp: now,
-            },
-            IndexSnapshot {
-                code: "399006.SZ".to_string(),
-                name: "创业板指".to_string(),
-                last_price: 2142.68,
-                change: -9.73,
-                change_pct: -0.0045,
-                turnover_amount: 1256.31,
-                timestamp: now,
-            },
-            IndexSnapshot {
-                code: "000688.SH".to_string(),
-                name: "科创50".to_string(),
-                last_price: 967.35,
-                change: 14.12,
-                change_pct: 0.0148,
-                turnover_amount: 487.95,
-                timestamp: now,
-            },
-            IndexSnapshot {
-                code: "000906.SH".to_string(),
-                name: "中证400".to_string(),
-                last_price: 4832.17,
-                change: 21.95,
-                change_pct: 0.0046,
-                turnover_amount: 945.62,
-                timestamp: now,
-            },
-            IndexSnapshot {
-                code: "000016.SH".to_string(),
-                name: "上证50".to_string(),
-                last_price: 2741.89,
-                change: 12.06,
-                change_pct: 0.0044,
-                turnover_amount: 876.28,
-                timestamp: now,
-            },
-        ];
-        Self { snapshots }
+    pub fn new(bridge: Arc<DataBridge>, cx: &mut Context<Self>) -> Self {
+        let (tx, rx) = async_channel::unbounded::<Vec<IndexQuote>>();
+        let polling_handle = bridge.start_polling_index_quotes(tx);
+        cx.spawn(async move |this, cx| {
+            while let Ok(quotes) = rx.recv().await {
+                let _ = this.update(cx, |s, cx| {
+                    // s.last_refresh = Some(chrono::Local::now());
+                    s.update_snapshots(quotes);
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+        let snapshots = Vec::with_capacity(6);
+        Self {
+            _bridge: bridge,
+            snapshots,
+            polling_handle,
+        }
+    }
+    fn update_snapshots(&mut self, new_snapshots: Vec<IndexQuote>) {
+        println!("receive index_quotes: {:?}", new_snapshots);
+        let new_snapshots: Vec<IndexSnapshot> = new_snapshots
+            .into_iter()
+            .map(|quote| IndexSnapshot {
+                code: quote.code,
+                name: quote.name,
+                last_price: quote.price,
+                change: quote.change,
+                change_pct: quote.change_pct,
+                turnover_amount: quote.amount,
+            })
+            .collect();
+        self.snapshots = new_snapshots;
     }
     fn render_indicator_cards(
         &self,
@@ -147,16 +127,17 @@ impl OverviewPanel {
                     .text_color(color)
                     .child(snap.last_price.clone().to_string()),
             )
-            .child(div().text_sm().text_color(color).child(format!(
-                "{:+.2}%   {}",
-                snap.change_pct * 100.0,
-                snap.change
-            )))
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(color)
+                    .child(format!("{:+.2}%   {}", snap.change_pct, snap.change)),
+            )
             .child(
                 div()
                     .text_xs()
                     .text_color(theme.text_tertiary)
-                    .child(format!("成交 {}", format_wan_yi(snap.turnover_amount))),
+                    .child(format!("成交 {:.2}亿", snap.turnover_amount)),
             )
     }
 }
