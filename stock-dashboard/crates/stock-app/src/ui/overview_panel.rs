@@ -3,12 +3,9 @@ use std::sync::Arc;
 use crate::{
     bridge::DataBridge,
     ui::theme::{AppThemePalette, theme_palette},
-    utils::format::format_wan_yi,
 };
-use chrono::Utc;
 use gpui_kit::{
-    base::{h_flex, v_flex},
-    component::ActiveTheme,
+    base::{StyledExt, h_flex, v_flex},
     *,
 };
 use stock_data::{IndexQuote, PollingHandle};
@@ -20,30 +17,12 @@ pub struct IndexSnapshot {
     pub change_pct: f64,      // 涨跌幅（小数，如0.025 = +2.5%）
     pub turnover_amount: f64, // 成交额
 }
-impl IndexSnapshot {
-    pub fn new(
-        code: &str,
-        name: &str,
-        last_price: f64,
-        change: f64,
-        change_pct: f64,
-        turnover_amount: f64,
-    ) -> Self {
-        Self {
-            code: code.into(),
-            name: name.into(),
-            last_price,
-            change,
-            change_pct,
-            turnover_amount,
-        }
-    }
-}
 pub struct OverviewPanel {
     /// 持有 bridge：保住 tokio runtime 生命周期（同 StockApp._bridge）
     _bridge: Arc<DataBridge>,
     snapshots: Vec<IndexSnapshot>,
     polling_handle: PollingHandle,
+    theme: AppThemePalette,
 }
 impl OverviewPanel {
     pub fn new(bridge: Arc<DataBridge>, cx: &mut Context<Self>) -> Self {
@@ -60,10 +39,12 @@ impl OverviewPanel {
         })
         .detach();
         let snapshots = Vec::with_capacity(6);
+        let theme = theme_palette(cx);
         Self {
             _bridge: bridge,
             snapshots,
             polling_handle,
+            theme,
         }
     }
     fn update_snapshots(&mut self, new_snapshots: Vec<IndexQuote>) {
@@ -90,19 +71,12 @@ impl OverviewPanel {
         h_flex().gap_3().w_full().justify_between().children(
             self.snapshots
                 .iter()
-                .map(|snap| self.render_snapshot_card(snap, &theme)),
+                .map(|snap| self.render_snapshot_card(snap)),
         )
     }
 
-    fn render_snapshot_card(
-        &self,
-        snap: &IndexSnapshot,
-        theme: &AppThemePalette,
-    ) -> impl IntoElement {
-        let color = match snap.change_pct >= 0.0 {
-            true => theme.color_rise,
-            false => theme.color_fall,
-        };
+    fn card(&self) -> Div {
+        let theme = self.theme;
         v_flex()
             .w_full()
             .p_3()
@@ -115,6 +89,14 @@ impl OverviewPanel {
                     .border_color(theme.color_rise)
                     .cursor_pointer()
             })
+    }
+    fn render_snapshot_card(&self, snap: &IndexSnapshot) -> impl IntoElement {
+        let color = match snap.change_pct >= 0.0 {
+            true => self.theme.color_rise,
+            false => self.theme.color_fall,
+        };
+        let theme = self.theme;
+        self.card()
             .child(
                 div()
                     .text_sm()
@@ -140,11 +122,35 @@ impl OverviewPanel {
                     .child(format!("成交 {:.2}亿", snap.turnover_amount)),
             )
     }
+
+    fn render_market_content(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = self.theme;
+        let color = theme.color_rise;
+        h_flex().gap_3().w_full().justify_between().children(vec![
+            self.card()
+                .child(
+                    div()
+                        .text_sm()
+                        .text_color(theme.text_secondary)
+                        .child(format!("")),
+                )
+                .child(div().text_xl().text_color(color).child(format!("")))
+                .child(div().text_sm().text_color(color).child(format!("")))
+                .child(
+                    div()
+                        .text_xs()
+                        .text_color(theme.text_tertiary)
+                        .child(format!("")),
+                ),
+        ])
+    }
 }
 impl Render for OverviewPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .h_full()
+            .v_flex()
+            .gap_8()
             .child(self.render_indicator_cards(window, cx))
     }
 }
