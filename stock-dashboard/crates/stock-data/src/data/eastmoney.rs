@@ -1,5 +1,6 @@
 use crate::common::error::{DataError, Result};
 use crate::common::models::*;
+use crate::data::cache::{AnyTtlCach, cache_prefix};
 use crate::data::eastmoney_types as raw;
 use crate::data::normalize as norm;
 use serde_json::Value;
@@ -11,12 +12,15 @@ const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
                   (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
 const REFERER: &str = "https://quote.eastmoney.com/center/gridlist.html";
 
+const A_SHARE_LIST_URL: &str = "https://assets.linkdiary.cn/shares/zh_a_list.json";
+
 #[derive(Clone)]
 pub struct EastmoneyClient {
     http: reqwest::Client,
-    limiter: TokenBucket, // 令牌桶限速器
-    base_q: String,       // push2 域名（实时快照类）
-    base_his: String,     // push2his 域名（K 线/分时类）
+    limiter: TokenBucket,   // 令牌桶限速器
+    base_q: String,         // push2 域名（实时快照类）
+    base_his: String,       // push2his 域名（K 线/分时类）
+    cache: Arc<AnyTtlCach>, // 缓存
 }
 
 impl EastmoneyClient {
@@ -47,6 +51,7 @@ impl EastmoneyClient {
             limiter,
             base_his,
             base_q,
+            cache: Arc::new(AnyTtlCach::new()),
         })
     }
 
@@ -194,5 +199,40 @@ impl EastmoneyClient {
             limit_down: rows.iter().filter(|q| q.change_pct <= 9.9).count(),
             total_amount: rows.iter().map(|q| q.amount).sum::<f64>() / 1e4,
         })
+    }
+
+    /// 获取全市场所有代码
+    pub async fn get_all_a_codes(&self) -> Result<Arc<Vec<String>>> {
+        if let Some(cache_value) = self
+            .cache
+            .get::<Vec<String>>(cache_prefix::ALL_A_CODES)
+            .await
+        {
+            return Ok(cache_value);
+        }
+
+        let v = self.get_json(A_SHARE_LIST_URL).await?;
+        if let Some(data) = v.as_array() {
+            let insert_value: Vec<String> = data
+                .iter()
+                .map(|i| i.as_str().unwrap_or("").to_string())
+                .filter(|i| !i.is_empty())
+                .collect();
+            let res = self
+                .cache
+                .insert(
+                    cache_prefix::ALL_A_CODES,
+                    insert_value,
+                    Duration::from_hours(24),
+                )
+                .await;
+
+            Ok(res)
+        } else {
+            return Err(DataError::Api(format!(
+                "接口返回异常: {}",
+                A_SHARE_LIST_URL
+            )));
+        }
     }
 }

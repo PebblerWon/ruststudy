@@ -83,12 +83,12 @@ impl OverviewPanel {
             .border(px(1.))
             .border_color(theme.border_primary)
             .rounded_xl()
-            .hover(|style| {
-                style
-                    .shadow_md()
-                    .border_color(theme.color_rise)
-                    .cursor_pointer()
-            })
+        // .hover(|style| {
+        //     style
+        //         .shadow_md()
+        //         .border_color(theme.color_rise)
+        //         .cursor_pointer()
+        // })
     }
     fn render_snapshot_card(&self, snap: &IndexSnapshot) -> impl IntoElement {
         let color = match snap.change_pct >= 0.0 {
@@ -126,23 +126,185 @@ impl OverviewPanel {
     fn render_market_content(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme;
         let color = theme.color_rise;
-        h_flex().gap_3().w_full().justify_between().children(vec![
-            self.card()
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(theme.text_secondary)
-                        .child(format!("")),
-                )
-                .child(div().text_xl().text_color(color).child(format!("")))
-                .child(div().text_sm().text_color(color).child(format!("")))
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(theme.text_tertiary)
-                        .child(format!("")),
-                ),
-        ])
+        div()
+            .grid()
+            .grid_cols(3)
+            .grid_rows(2)
+            .gap_3()
+            .w_full()
+            .justify_between()
+            .children(vec![
+                self.card()
+                    .h_32()
+                    .child(
+                        div()
+                            .mb_2()
+                            .text_sm()
+                            .text_color(theme.text_secondary)
+                            .font_bold()
+                            .child(format!("市场涨跌")),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .text_2xl()
+                            .text_color(theme.color_rise)
+                            .children(vec![
+                                div().text_color(theme.color_rise).child("2683"),
+                                div().text_color(theme.text_tertiary).child(" / "),
+                                div().text_color(theme.color_fall).child("2822"),
+                            ]),
+                    )
+                    .child(
+                        h_flex()
+                            .mt_auto()
+                            .justify_between()
+                            .text_xs()
+                            .text_color(theme.text_tertiary)
+                            .children(vec![
+                                div().child("上涨 / 下跌"),
+                                div().child(format!("172平")),
+                            ]),
+                    ),
+                self.card()
+                    .h_32()
+                    .child(
+                        div()
+                            .mb_2()
+                            .text_sm()
+                            .text_color(theme.text_secondary)
+                            .font_bold()
+                            .child(format!("涨跌停")),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .text_2xl()
+                            .text_color(theme.color_rise)
+                            .children(vec![
+                                div().text_color(theme.color_rise).child("66"),
+                                div().text_color(theme.text_tertiary).child("/"),
+                                div().text_color(theme.color_fall).child("82"),
+                            ]),
+                    )
+                    .child(
+                        h_flex()
+                            .mt_auto()
+                            .justify_between()
+                            .text_xs()
+                            .text_color(theme.text_tertiary)
+                            .children(vec![div().child("涨停 / 跌停")]),
+                    ),
+                self.card()
+                    .h_32()
+                    .child(
+                        div()
+                            .mb_2()
+                            .text_sm()
+                            .text_color(theme.text_secondary)
+                            .font_bold()
+                            .child(format!("全市场成交额")),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .text_2xl()
+                            .text_color(theme.text_secondary)
+                            .child(format!("9722.54亿")),
+                    )
+                    .child(
+                        h_flex()
+                            .mt_auto()
+                            .justify_between()
+                            .text_xs()
+                            .text_color(theme.text_tertiary)
+                            .child(format!("A 股实时成交额快照")),
+                    ),
+                self.card()
+                    .h_32()
+                    .child(
+                        div()
+                            .mb_2()
+                            .text_sm()
+                            .text_color(theme.text_secondary)
+                            .font_bold()
+                            .child(format!("北向资金")),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .text_2xl()
+                            .text_color(theme.text_secondary)
+                            .child(format!("0.54亿")),
+                    )
+                    .child(
+                        h_flex()
+                            .mt_auto()
+                            .justify_between()
+                            .text_xs()
+                            .text_color(theme.text_tertiary)
+                            .children(vec![
+                                div().child(format!("上涨 971 / 下跌 639")),
+                                div().child(format!("沪股通")),
+                            ]),
+                    ),
+                self.card()
+                    .h_32()
+                    .child(
+                        div()
+                            .mb_2()
+                            .text_sm()
+                            .text_color(theme.text_secondary)
+                            .font_bold()
+                            .child(format!("大盘主力")),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .text_2xl()
+                            .text_color(theme.text_secondary)
+                            .child(format!("-396.66亿")),
+                    )
+                    .child(
+                        h_flex()
+                            .mt_auto()
+                            .justify_between()
+                            .text_xs()
+                            .text_color(theme.text_tertiary)
+                            .children(vec![
+                                div().child(format!("占比 -2.37%")),
+                                div().child(format!("2026-10-30")),
+                            ]),
+                    ),
+                self.card()
+                    .h_32()
+                    .child(
+                        div()
+                            .mb_2()
+                            .text_sm()
+                            .text_color(theme.text_secondary)
+                            .font_bold()
+                            .child(format!("最强板块")),
+                    )
+                    .child(
+                        h_flex()
+                            .gap_2()
+                            .text_2xl()
+                            .text_color(theme.text_secondary)
+                            .child(format!("视频媒体")),
+                    )
+                    .child(
+                        h_flex()
+                            .mt_auto()
+                            .justify_between()
+                            .text_xs()
+                            .text_color(theme.text_tertiary)
+                            .children(vec![
+                                div().text_color(theme.color_rise).child(format!("-2.37%")),
+                                div().child(format!("行业强度")),
+                            ]),
+                    ),
+            ])
     }
 }
 impl Render for OverviewPanel {
@@ -150,7 +312,8 @@ impl Render for OverviewPanel {
         div()
             .h_full()
             .v_flex()
-            .gap_8()
+            .gap_3()
             .child(self.render_indicator_cards(window, cx))
+            .child(self.render_market_content(cx))
     }
 }

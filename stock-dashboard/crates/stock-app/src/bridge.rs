@@ -25,9 +25,9 @@ impl DataBridge {
 
     /// 启动轮询：任务跑在 tokio runtime 内，结果经 tx 推给 UI。
     /// 返回句柄由 UI 侧保存（窗口关闭/退出时 stop）。
-    pub fn start_polling_quotes(
+    pub fn start_polling_market_snapshot(
         &self,
-        tx: async_channel::Sender<Vec<stock_data::Quote>>,
+        tx: async_channel::Sender<stock_data::MarketSnapshot>,
     ) -> PollingHandle {
         let client = self.client.clone();
         // spawn_polling 内部 tokio::spawn，必须在 runtime 上下文里调用
@@ -36,8 +36,8 @@ impl DataBridge {
             spawn_polling(
                 move || {
                     let client = client.clone();
-                    let codes = vec!["000001", "600000"];
-                    async move { client.quotes(&codes).await }
+
+                    async move { client.market_snapshot().await }
                 },
                 move |quotes| {
                     let _ = tx.try_send(quotes);
