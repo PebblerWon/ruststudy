@@ -2,13 +2,16 @@ use std::sync::Arc;
 
 use crate::{
     bridge::DataBridge,
-    ui::theme::{AppThemePalette, theme_palette},
+    ui::{
+        app::StockAppState,
+        theme::{AppThemePalette, theme_palette},
+    },
 };
 use gpui_kit::{
     base::{StyledExt, h_flex, v_flex},
     *,
 };
-use stock_data::{IndexQuote, PollingHandle};
+use stock_data::{IndexQuote, MarketSnapshot, PollingHandle};
 pub struct IndexSnapshot {
     pub code: String,         // 指数代码 000001.SH
     pub name: String,         // 指数名称：上证指数
@@ -23,9 +26,15 @@ pub struct OverviewPanel {
     snapshots: Vec<IndexSnapshot>,
     polling_handle: PollingHandle,
     theme: AppThemePalette,
+    app_state: Entity<StockAppState>,
+    market_snapshot: Option<MarketSnapshot>,
 }
 impl OverviewPanel {
-    pub fn new(bridge: Arc<DataBridge>, cx: &mut Context<Self>) -> Self {
+    pub fn new(
+        bridge: Arc<DataBridge>,
+        cx: &mut Context<Self>,
+        app_state: Entity<StockAppState>,
+    ) -> Self {
         let (tx, rx) = async_channel::unbounded::<Vec<IndexQuote>>();
         let polling_handle = bridge.start_polling_index_quotes(tx);
         cx.spawn(async move |this, cx| {
@@ -38,6 +47,8 @@ impl OverviewPanel {
             }
         })
         .detach();
+        cx.observe(&app_state, Self::handle_app_state_change)
+            .detach();
         let snapshots = Vec::with_capacity(6);
         let theme = theme_palette(cx);
         Self {
@@ -45,10 +56,32 @@ impl OverviewPanel {
             snapshots,
             polling_handle,
             theme,
+            app_state,
+            market_snapshot: None,
+        }
+    }
+    fn handle_app_state_change(&mut self, _state: Entity<StockAppState>, cx: &mut Context<Self>) {
+        let all_a_codes = &_state.read(cx).all_a_codes;
+        let bridge = self._bridge.clone();
+        if let Some(codes) = all_a_codes {
+            if codes.len() > 0 {
+                let (tx, rx) = async_channel::unbounded::<stock_data::MarketSnapshot>();
+                let _ = bridge.start_polling_market_snapshot(tx);
+                cx.spawn(async move |this, cx| {
+                    while let Ok(market_snapshot) = rx.recv().await {
+                        let _ = this.update(cx, |s, cx| {
+                            // s.last_refresh = Some(chrono::Local::now());
+                            s.market_snapshot = Some(market_snapshot);
+                            cx.notify();
+                        });
+                    }
+                })
+                .detach();
+            }
         }
     }
     fn update_snapshots(&mut self, new_snapshots: Vec<IndexQuote>) {
-        println!("receive index_quotes: {:?}", new_snapshots);
+        // println!("receive index_quotes: {:?}", new_snapshots);
         let new_snapshots: Vec<IndexSnapshot> = new_snapshots
             .into_iter()
             .map(|quote| IndexSnapshot {
@@ -126,6 +159,8 @@ impl OverviewPanel {
     fn render_market_content(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme;
         let color = theme.color_rise;
+        let market_snapshot = &self.market_snapshot;
+
         div()
             .grid()
             .grid_cols(3)
@@ -150,9 +185,17 @@ impl OverviewPanel {
                             .text_2xl()
                             .text_color(theme.color_rise)
                             .children(vec![
-                                div().text_color(theme.color_rise).child("2683"),
+                                div().text_color(theme.color_rise).child(
+                                    market_snapshot
+                                        .as_ref()
+                                        .map_or("--".to_string(), |s| s.up_count.to_string()),
+                                ),
                                 div().text_color(theme.text_tertiary).child(" / "),
-                                div().text_color(theme.color_fall).child("2822"),
+                                div().text_color(theme.color_fall).child(
+                                    market_snapshot
+                                        .as_ref()
+                                        .map_or("--".to_string(), |s| s.down_count.to_string()),
+                                ),
                             ]),
                     )
                     .child(
@@ -163,7 +206,12 @@ impl OverviewPanel {
                             .text_color(theme.text_tertiary)
                             .children(vec![
                                 div().child("上涨 / 下跌"),
-                                div().child(format!("172平")),
+                                div().child(format!(
+                                    "{}平",
+                                    market_snapshot
+                                        .as_ref()
+                                        .map_or("--".to_string(), |s| s.flat_count.to_string())
+                                )),
                             ]),
                     ),
                 self.card()
@@ -182,9 +230,17 @@ impl OverviewPanel {
                             .text_2xl()
                             .text_color(theme.color_rise)
                             .children(vec![
-                                div().text_color(theme.color_rise).child("66"),
+                                div().text_color(theme.color_rise).child(
+                                    market_snapshot
+                                        .as_ref()
+                                        .map_or("--".to_string(), |s| s.limit_up.to_string()),
+                                ),
                                 div().text_color(theme.text_tertiary).child("/"),
-                                div().text_color(theme.color_fall).child("82"),
+                                div().text_color(theme.color_fall).child(
+                                    market_snapshot
+                                        .as_ref()
+                                        .map_or("--".to_string(), |s| s.limit_down.to_string()),
+                                ),
                             ]),
                     )
                     .child(

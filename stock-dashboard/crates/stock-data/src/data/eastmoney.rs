@@ -168,13 +168,13 @@ impl EastmoneyClient {
         let mut total = 0usize;
         let mut rows: Vec<Quote> = Vec::new();
 
-        for pn in 1..=100usize {
+        for pn in 1..=100 {
             let url = format!(
                 "{}/clist/get?pn={pn}&pz=100&po=1&np=1&fltt=2&invt=2&fid=f3&fs={fs}&fields={fields}",
                 self.base_q,
             );
             let v = self.get_json(&url).await?;
-            let data = raw::take_data(&v, "clist")?;
+            let data = raw::take_data(&v, &url)?;
             total = data["total"].as_u64().unwrap_or(0) as usize;
             let page: Vec<Quote> = data["diff"]
                 .as_array()
@@ -196,7 +196,7 @@ impl EastmoneyClient {
             down_count: rows.iter().filter(|q| q.change_pct < 0.0).count(),
             flat_count: rows.iter().filter(|q| q.change_pct == 0.0).count(),
             limit_up: rows.iter().filter(|q| q.change_pct >= 9.9).count(),
-            limit_down: rows.iter().filter(|q| q.change_pct <= 9.9).count(),
+            limit_down: rows.iter().filter(|q| q.change_pct <= -9.9).count(),
             total_amount: rows.iter().map(|q| q.amount).sum::<f64>() / 1e4,
         })
     }
@@ -210,9 +210,11 @@ impl EastmoneyClient {
         {
             return Ok(cache_value);
         }
-
         let v = self.get_json(A_SHARE_LIST_URL).await?;
-        if let Some(data) = v.as_array() {
+        let value_data = v
+            .get("list")
+            .ok_or_else(|| DataError::Api(format!("data 为空")))?;
+        if let Some(data) = value_data.as_array() {
             let insert_value: Vec<String> = data
                 .iter()
                 .map(|i| i.as_str().unwrap_or("").to_string())

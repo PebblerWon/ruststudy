@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use async_channel::Sender;
 use gpui_kit::base::{h_flex, v_flex};
 use gpui_kit::component::ActiveTheme;
 use gpui_kit::component::sidebar::{
@@ -11,16 +12,18 @@ use gpui_kit::prelude::FluentBuilder as _;
 
 use gpui_kit::*;
 
-use crate::bridge::DataBridge;
+use crate::bridge::{self, DataBridge};
 use crate::ui::overview_panel::OverviewPanel;
 use crate::ui::ranklist_panel::RanklistPanel;
 use stock_data::{PollingHandle, Quote};
 
-pub struct StockAppState {}
+pub struct StockAppState {
+    pub all_a_codes: Option<Arc<Vec<String>>>,
+}
 
 impl StockAppState {
     pub fn new() -> Self {
-        Self {}
+        Self { all_a_codes: None }
     }
 }
 
@@ -44,13 +47,14 @@ pub struct StockApp {
     /// 持有 bridge：保住 tokio runtime 生命周期，
     /// 否则 gpui 丢弃启动闭包后 Arc 归零，runtime 被提前 drop
     _bridge: Arc<DataBridge>,
+    app_state: Entity<StockAppState>,
 }
 
 impl StockApp {
     pub fn new(_window: &mut Window, cx: &mut Context<Self>, bridge: Arc<DataBridge>) -> Self {
-        let overview_panel = cx.new(|cx| OverviewPanel::new(bridge.clone(), cx));
+        let app_state = cx.new(|cx| StockAppState::new());
+        let overview_panel = cx.new(|cx| OverviewPanel::new(bridge.clone(), cx, app_state.clone()));
         let ranklist_panel = cx.new(|cx| RanklistPanel::new());
-
         let menus = vec![
             StockAppMenuItem {
                 label: "总览".into(),
@@ -63,15 +67,33 @@ impl StockApp {
                 panel: AppPanel::Ranklist(ranklist_panel),
             },
         ];
-
+        Self::init_data(cx, bridge.clone());
         Self {
             collapsed: false,
             active_key: menus[0].key.clone(),
             menus,
-            _bridge: bridge,
+            _bridge: bridge.clone(),
+            app_state,
         }
     }
 
+    fn init_data(cx: &mut Context<Self>, bridge: Arc<DataBridge>) {
+        let _bridge = bridge.clone();
+        cx.spawn(async move |this, cx| {
+            let (tx, rx) = async_channel::unbounded::<Arc<Vec<String>>>();
+            let _ = _bridge.get_all_a_codes(tx);
+            while let Ok(quotes) = rx.recv().await {
+                let _ = this.update(cx, |s, cx| {
+                    s.app_state.update(cx, |app_state, cx| {
+                        app_state.all_a_codes = Some(quotes);
+                        cx.notify();
+                    });
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+    }
     fn render_main_content(
         &self,
         _window: &mut Window,

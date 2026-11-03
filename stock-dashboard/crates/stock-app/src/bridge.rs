@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use stock_data::{EastmoneyClient, PollingHandle, spawn_polling};
+use stock_data::{DataError, EastmoneyClient, PollingHandle, spawn_polling};
 pub struct DataBridge {
     rt: tokio::runtime::Runtime,
     pub client: Arc<EastmoneyClient>,
@@ -31,16 +31,14 @@ impl DataBridge {
     ) -> PollingHandle {
         let client = self.client.clone();
         // spawn_polling 内部 tokio::spawn，必须在 runtime 上下文里调用
-
         self.rt.block_on(async move {
             spawn_polling(
                 move || {
                     let client = client.clone();
-
                     async move { client.market_snapshot().await }
                 },
-                move |quotes| {
-                    let _ = tx.try_send(quotes);
+                move |snapshot| {
+                    let _ = tx.try_send(snapshot);
                 },
             )
         })
@@ -65,6 +63,19 @@ impl DataBridge {
                     let _ = tx.try_send(data);
                 },
             )
+        })
+    }
+
+    pub fn get_all_a_codes(
+        &self,
+        tx: async_channel::Sender<Arc<Vec<String>>>,
+    ) -> Result<(), DataError> {
+        let client = self.client.clone();
+        self.rt.block_on(async move {
+            let data = client.get_all_a_codes().await.unwrap_or(Arc::new(vec![]));
+
+            tx.try_send(data)
+                .map_err(|err| DataError::ProcessError(err.to_string()))
         })
     }
 }

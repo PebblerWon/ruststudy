@@ -1,3 +1,5 @@
+use std::{any::Any, sync::mpsc::TrySendError};
+
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -13,6 +15,9 @@ pub enum DataError {
 
     #[error("接口返回异常: {0}")]
     Api(String),
+
+    #[error("进程异常: {0}")]
+    ProcessError(String),
 }
 
 pub type Result<T> = std::result::Result<T, DataError>;
