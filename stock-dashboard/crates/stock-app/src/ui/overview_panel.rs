@@ -266,7 +266,11 @@ impl OverviewPanel {
                             .gap_2()
                             .text_2xl()
                             .text_color(theme.text_secondary)
-                            .child(format!("9722.54亿")),
+                            .child(market_snapshot.as_ref().map_or("--".to_string(), |s| {
+                                // 注意：不能写成 format!("{:.2}亿", s.total_amount.to_string())，
+                                // {:.2} 对字符串是截取前 2 字符，会把 10456.78 显示成 "10亿"
+                                format!("{:.2}亿", s.total_amount)
+                            })),
                     )
                     .child(
                         h_flex()

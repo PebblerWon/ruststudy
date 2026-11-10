@@ -161,9 +161,17 @@ impl EastmoneyClient {
     }
 
     /// 全市场快照（clist 分页拉全量 + 本地统计）
-    /// 实测全市场约 5400 只，pz=100 约 55 页；max_pages 兜底防死循环
+    /// 沪主板+深主板+创业板+科创板+北交所，在市约 5580 只
+    /// （官方中上协 2026-09 口径 5579 家上市公司；我方为证券口径，A+B 双重上市只计 A 股证券）
+    /// ⚠️ 1. fs 不能用裸 m:0+t:81 —— 会混入新三板 6700+ 僵尸品种；
+    ///       北交所需用 m:0+t:81+s:2048 精确圈定（365 只，代码段 82/83/87/88/92）
+    /// ⚠️ 2. 市场过滤符会附带历史退市股档案（约 350 条，简称带"退"/"PT"，f2 返 "-"），
+    ///       已按 is_suspended 剔除，不参与 total 与涨跌统计
+    /// ⚠️ 3. B 股（沪 m:1+t:3 / 深 m:0+t:7，共 114 条）不在统计内：官方口径含 B 公司，
+    ///       但 B 股流动性趋零，涨跌家数无参考价值
+    /// 实测在市+停牌+退市约 5900+ 条，pz=100 约 60 页；100 页上限足够，防死循环兼兜底
     pub async fn market_snapshot(&self) -> Result<MarketSnapshot> {
-        let fs = "m:1+t:2,m:0+t:6,m:0+t:80,m:1+t:23"; // 沪深主板+创业+科创，不含北交
+        let fs = "m:1+t:2,m:0+t:6,m:0+t:80,m:1+t:23,m:0+t:81+s:2048"; // 沪主板+深主板+创业板+科创板+北交所
         let fields = "f2,f3,f5,f6,f8,f12,f13,f14,f20,f21";
         let mut total = 0usize;
         let mut rows: Vec<Quote> = Vec::new();
@@ -189,14 +197,26 @@ impl EastmoneyClient {
             }
         }
         tracing::debug!(total, fetched = rows.len(), "market_snapshot done");
+        if rows.len() < total {
+            tracing::warn!(
+                fetched = rows.len(),
+                total,
+                "market_snapshot 分页未拉全，涨跌统计可能失真"
+            );
+        }
+
+        // 停牌股与退市股档案的 f2 均返回 "-"（is_suspended），
+        // 二者都不该计入在市家数与涨跌统计，统一剔除
+        let active: Vec<&Quote> = rows.iter().filter(|q| !q.is_suspended).collect();
 
         Ok(MarketSnapshot {
-            total: rows.len(),
-            up_count: rows.iter().filter(|q| q.change_pct > 0.0).count(),
-            down_count: rows.iter().filter(|q| q.change_pct < 0.0).count(),
-            flat_count: rows.iter().filter(|q| q.change_pct == 0.0).count(),
-            limit_up: rows.iter().filter(|q| q.change_pct >= 9.9).count(),
-            limit_down: rows.iter().filter(|q| q.change_pct <= -9.9).count(),
+            // 在市证券数（含真平盘）；停牌与退市档案不计入，保证 up+down+flat == total
+            total: active.len(),
+            up_count: active.iter().filter(|q| q.change_pct > 0.0).count(),
+            down_count: active.iter().filter(|q| q.change_pct < 0.0).count(),
+            flat_count: active.iter().filter(|q| q.change_pct == 0.0).count(),
+            limit_up: active.iter().filter(|q| q.change_pct >= 9.9).count(),
+            limit_down: active.iter().filter(|q| q.change_pct <= -9.9).count(),
             total_amount: rows.iter().map(|q| q.amount).sum::<f64>() / 1e4,
         })
     }
