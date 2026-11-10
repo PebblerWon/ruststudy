@@ -1,0 +1,655 @@
+/**
+ * 东方财富 - 公募基金扩展数据
+ *
+ * 数据源：https://fund.eastmoney.com/Data/funddataIndex_Interface.aspx
+ *
+ * 该接口返回一段 JS 变量声明（`var pageinfo = ...; var jjfh_data = ...;`），
+ * 通过 fetchJsVars 双端解析。
+ */
+import { fetchJsVars } from '../../core/jsVars';
+import { toFiniteNumberOrNull } from '../../core/parser';
+import {
+  todayInTz,
+  MARKET_TZ,
+  parseMarketTime,
+  toNullableEpoch,
+} from '../../core/time';
+import type { RequestClient } from '../../core/request';
+import type {
+  FundDividend,
+  FundDividendListOptions,
+  FundDividendListResult,
+  FundNavHistory,
+  FundNavPoint,
+  FundRankHistory,
+  FundRankPoint,
+  FundProfile,
+  FundHolding,
+  FundBondHolding,
+  FundAssetAllocation,
+  FundPositionPoint,
+  FundManager,
+  FundPerformanceEvaluation,
+  FundHolderStructure,
+  FundScaleChange,
+  FundBuySedemption,
+  FundStageReturns,
+  FundSameType,
+  FundSameTypePeer,
+} from '../../types';
+
+const FUND_DATA_INDEX_URL =
+  'https://fund.eastmoney.com/Data/funddataIndex_Interface.aspx';
+
+const FUND_PINGZHONGDATA_URL = 'https://fund.eastmoney.com/pingzhongdata';
+
+interface FundDividendRaw {
+  /** `[总页数, 每页条数, 当前页]` */
+  pageinfo?: [number, number, number];
+  /** 每条 7 个字段：`[code, name, 登记日, 除息日, 分红, 发放日, 类型]` */
+  jjfh_data?: string[][];
+}
+
+function currentYearShanghai(): number {
+  // F43: 按北京时间(Asia/Shanghai)取年份。此前用本地时区 getFullYear(),
+  // 跨年瞬间在非 UTC+8 时区会差 ±1 年(如美西 12-31 晚已是北京 1-1)。
+  return Number(todayInTz(MARKET_TZ.CN).slice(0, 4));
+}
+
+function buildUrl(opts: FundDividendListOptions, page: number): string {
+  const params = new URLSearchParams({
+    dt: '8',
+    page: String(page),
+    rank: opts.rank ?? 'FSRQ',
+    sort: opts.sort ?? 'desc',
+    gs: '',
+    ftype: opts.fundType ?? '',
+    year: String(opts.year ?? currentYearShanghai()),
+  });
+  return `${FUND_DATA_INDEX_URL}?${params.toString()}`;
+}
+
+function parseDate(s: string | undefined): string | null {
+  if (!s) return null;
+  const m = s.trim().match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : null;
+}
+
+// F44: 本文件原有 parseNumber / toNullableNumber / toDailyReturn / toNullableInt
+// 四个语义完全一致的局部数字解析器(undefined/''/'--' → null,Number 严格解析,
+// 拒绝 Infinity),统一收编为 core/parser 的 toFiniteNumberOrNull。
+
+function mapRow(row: string[]): FundDividend {
+  return {
+    code: row[0] ?? '',
+    name: row[1] ?? '',
+    equityRecordDate: parseDate(row[2]),
+    exDividendDate: parseDate(row[3]),
+    dividendPerShare: toFiniteNumberOrNull(row[4]),
+    payDate: parseDate(row[5]),
+    // v1 时代该列只能通过 raw[6] 获取;v2 删除 raw 后必须显式映射,否则数据不可达
+    dividendType: row[6]?.trim() ? row[6].trim() : null,
+  };
+}
+
+/** 拉取单页（不做客户端过滤、不做翻页聚合） */
+async function fetchOnePage(
+  client: RequestClient,
+  opts: FundDividendListOptions,
+  page: number
+): Promise<FundDividendListResult> {
+  const url = buildUrl(opts, page);
+  const vars = await fetchJsVars<FundDividendRaw>(
+    url,
+    ['pageinfo', 'jjfh_data'],
+    { client }
+  );
+  const info = vars.pageinfo ?? [0, 0, page];
+  const [totalPages = 0, pageSize = 0, currentPage = page] = info;
+  const rawRows = vars.jjfh_data ?? [];
+  return {
+    items: rawRows.map(mapRow),
+    totalPages,
+    pageSize,
+    currentPage,
+  };
+}
+
+/**
+ * 获取基金分红明细列表（来自东方财富 / 天天基金分红送配频道）。
+ *
+ * 接口本身只支持「年份 + 全市场 + 翻页」查询，不能服务端按基金代码精确查。
+ * SDK 提供 `code` 选项在客户端过滤；若要拿到某只基金该年完整分红记录，
+ * 应搭配 `page: 'all'` 一起使用。
+ *
+ * @example
+ * // 拉 2024 年第 1 页（默认按除息日倒序）
+ * await sdk.fund.dividendList({ year: 2024 });
+ *
+ * @example
+ * // 拉 2024 年 110011 的全部分红
+ * await sdk.fund.dividendList({ year: 2024, page: 'all', code: '110011' });
+ */
+export async function getFundDividendList(
+  client: RequestClient,
+  options: FundDividendListOptions = {}
+): Promise<FundDividendListResult> {
+  if (options.page === 'all') {
+    const first = await fetchOnePage(client, options, 1);
+    let items = first.items;
+    for (let p = 2; p <= first.totalPages; p++) {
+      const next = await fetchOnePage(client, options, p);
+      items = items.concat(next.items);
+    }
+    if (options.code) {
+      items = items.filter((it) => it.code === options.code);
+    }
+    return {
+      items,
+      totalPages: first.totalPages,
+      pageSize: first.pageSize,
+      currentPage: -1,
+    };
+  }
+
+  const page = options.page ?? 1;
+  const result = await fetchOnePage(client, options, page);
+  if (options.code) {
+    return {
+      ...result,
+      items: result.items.filter((it) => it.code === options.code),
+    };
+  }
+  return result;
+}
+
+// ============================================================
+// 历史净值（pingzhongdata.js）
+// ============================================================
+
+interface FundNavRaw {
+  fS_code?: string;
+  fS_name?: string;
+  /** `[{x, y, equityReturn, unitMoney}, ...]` —— 单位净值走势 */
+  Data_netWorthTrend?: Array<{
+    x: number;
+    y: number;
+    equityReturn: number | string;
+    unitMoney: string;
+  }>;
+  /** `[[x, accNav], ...]` —— 累计净值走势 */
+  Data_ACWorthTrend?: Array<[number, number]>;
+}
+
+/**
+ * 上游行时间戳有效性门（R7-8，与 parsePositions 同款防御）：
+ * timestampToDate 对 NaN/Infinity/字符串会在 Intl 层抛 RangeError（一行脏数据
+ * 毁掉整个几千行结果）；x 为 undefined 更隐蔽 —— todayInTz 的默认参数会落到
+ * Date.now()，静默产出"今天"的幽灵行。
+ */
+function isFiniteTs(v: unknown): v is number {
+  return typeof v === 'number' && Number.isFinite(v);
+}
+
+function timestampToDate(ts: number): string {
+  // pingzhongdata 的 x 是「北京时间当日 00:00」的毫秒数（= 16:00 UTC，每条对应 A 股
+  // 一个交易日）。必须按北京时区取日期：直接切 UTC ISO 会得到前一天（早 8 小时）。
+  // 复用 core/time 的 todayInTz（夏令时安全），与全库日期口径一致。
+  return todayInTz(MARKET_TZ.CN, ts);
+}
+
+/**
+ * 报告期日期串（北京时区，如 `"2025-09-30"`）→ UTC 毫秒。
+ * 走 core/time 的 parseMarketTime（夏令时安全）+ toNullableEpoch
+ * （v2 对外契约禁止 NaN：无法解析归一为 `null`）。
+ */
+function reportDateToTs(date: string): number | null {
+  return toNullableEpoch(parseMarketTime(date, MARKET_TZ.CN));
+}
+
+/** 从 `{name,data}` series 数组里按名取 data 序列；series 或该名缺失时为 `[]`。 */
+function seriesData(
+  series: Array<{ name?: string; data?: (number | null)[] }> | undefined,
+  name: string
+): (number | null)[] {
+  return series?.find((s) => s.name === name)?.data ?? [];
+}
+
+/**
+ * 获取基金历史净值（单位净值 + 累计净值，按 timestamp 对齐合并）。
+ *
+ * 数据源：`https://fund.eastmoney.com/pingzhongdata/{code}.js`
+ *
+ * 一次请求拿到该基金从成立日到最新交易日的全部净值（数千条），
+ * 无需翻页。开放式基金、ETF、LOF、货币、QDII 均通用。
+ *
+ * @param code 基金代码（纯数字，如 `'110011'`）
+ *
+ * @example
+ * const h = await sdk.fund.navHistory('110011');
+ * console.log(h.name, h.items.length, h.items[h.items.length - 1]);
+ */
+export async function getFundNavHistory(
+  client: RequestClient,
+  code: string
+): Promise<FundNavHistory> {
+  const url = `${FUND_PINGZHONGDATA_URL}/${encodeURIComponent(code)}.js`;
+  const vars = await fetchJsVars<FundNavRaw>(
+    url,
+    ['fS_code', 'fS_name', 'Data_netWorthTrend', 'Data_ACWorthTrend'],
+    { client }
+  );
+
+  const trend = vars.Data_netWorthTrend ?? [];
+  // 把累计净值按 timestamp 建索引，O(1) 对齐。
+  // R7-8: 建索引与取值同样过校验 —— 上游 [ts,"1.234"] 这类字符串 y（JSON 合法）
+  // 此前经裸 as number 直通，运行时类型违反 accNav: number | null 声明
+  const accMap = new Map<number, number | null>();
+  for (const row of vars.Data_ACWorthTrend ?? []) {
+    if (Array.isArray(row) && row.length >= 2 && isFiniteTs(row[0])) {
+      accMap.set(row[0], toFiniteNumberOrNull(row[1]));
+    }
+  }
+
+  const items: FundNavPoint[] = trend
+    .filter((p) => p && isFiniteTs(p.x))
+    .map((p) => ({
+      date: timestampToDate(p.x),
+      timestamp: p.x,
+      nav: toFiniteNumberOrNull(p.y),
+      accNav: accMap.get(p.x) ?? null,
+      dailyReturn: toFiniteNumberOrNull(p.equityReturn),
+      unitMoney: p.unitMoney ?? '',
+    }));
+
+  return {
+    code: vars.fS_code ?? code,
+    name: vars.fS_name ?? null,
+    items,
+  };
+}
+
+// ============================================================
+// 同类排名走势（pingzhongdata.js 的 rank 字段）
+// ============================================================
+
+interface FundRankRaw {
+  fS_code?: string;
+  fS_name?: string;
+  /** `[{x: ms, y: 排名, sc: 同类总数}, ...]` */
+  Data_rateInSimilarType?: Array<{
+    x: number;
+    y: number | string;
+    sc: number | string;
+  }>;
+  /** `[[ms, 百分位], ...]` */
+  Data_rateInSimilarPersent?: Array<[number, number]>;
+}
+
+/**
+ * 获取基金同类排名走势（每日近三月排名 + 百分位）。
+ *
+ * 数据源：与 `getFundNavHistory` 相同的 `pingzhongdata/{code}.js`，
+ * 取 `Data_rateInSimilarType`（排名 + 同类总数）和
+ * `Data_rateInSimilarPersent`（百分位），按 timestamp 对齐合并。
+ *
+ * @param code 基金代码
+ */
+export async function getFundRankHistory(
+  client: RequestClient,
+  code: string
+): Promise<FundRankHistory> {
+  const url = `${FUND_PINGZHONGDATA_URL}/${encodeURIComponent(code)}.js`;
+  const vars = await fetchJsVars<FundRankRaw>(
+    url,
+    [
+      'fS_code',
+      'fS_name',
+      'Data_rateInSimilarType',
+      'Data_rateInSimilarPersent',
+    ],
+    { client }
+  );
+
+  const series = vars.Data_rateInSimilarType ?? [];
+  // R7-8: 与 navHistory 同款 —— 建索引/取值均过校验，不再裸 as number
+  const percentMap = new Map<number, number | null>();
+  for (const row of vars.Data_rateInSimilarPersent ?? []) {
+    if (Array.isArray(row) && row.length >= 2 && isFiniteTs(row[0])) {
+      percentMap.set(row[0], toFiniteNumberOrNull(row[1]));
+    }
+  }
+
+  const items: FundRankPoint[] = series
+    .filter((p) => p && isFiniteTs(p.x))
+    .map((p) => ({
+      date: timestampToDate(p.x),
+      timestamp: p.x,
+      rank: toFiniteNumberOrNull(p.y),
+      total: toFiniteNumberOrNull(p.sc),
+      percentile: percentMap.get(p.x) ?? null,
+    }));
+
+  return {
+    code: vars.fS_code ?? code,
+    name: vars.fS_name ?? null,
+    items,
+  };
+}
+
+// ============================================================
+// 基金深度资料（pingzhongdata 全量字段，一次请求）
+// ============================================================
+
+interface FundProfileRaw {
+  fS_code?: string;
+  fS_name?: string;
+  fund_sourceRate?: string;
+  fund_Rate?: string;
+  fund_minsg?: string;
+  /** 前十大重仓股代码（新市场号编码：`"0.300308"`, `"1.688012"`, ...） */
+  stockCodesNew?: string[];
+  /** 前五大债券持仓代码（新市场号编码） */
+  zqCodesNew?: string;
+  /** 资产配置 */
+  Data_assetAllocation?: {
+    series?: Array<{
+      name?: string;
+      data?: (number | null)[];
+    }>;
+    categories?: string[];
+  };
+  /** 股票仓位测算（每日） */
+  Data_fundSharesPositions?: Array<[number, number]>;
+  /** 基金经理（真实字段：id/pic/name/star/workTime/fundSize/power/profit） */
+  Data_currentFundManager?: Array<{
+    id?: string;
+    /** 头像 URL */
+    pic?: string;
+    name?: string;
+    /** 星级（0–5） */
+    star?: number;
+    /** 任职年限描述，如 `"14年又192天"` */
+    workTime?: string;
+    /** 在管规模描述，如 `"78.91亿(4只基金)"` */
+    fundSize?: string;
+    /** 能力评分雷达（结构同 Data_performanceEvaluation） */
+    power?: {
+      avr?: string;
+      categories?: string[];
+      dsc?: string[];
+      data?: number[];
+    };
+  }>;
+  /** 业绩评价 */
+  Data_performanceEvaluation?: {
+    avr?: string;
+    categories?: string[];
+    dsc?: string[];
+    data?: number[];
+  };
+  /** 持有人结构 */
+  Data_holderStructure?: {
+    categories?: string[];
+    series?: Array<{ name?: string; data?: (number | null)[] }>;
+  };
+  /** 规模变动 */
+  Data_fluctuationScale?: {
+    categories?: string[];
+    series?: Array<{ y?: number; mom?: string }>;
+  };
+  /** 申购赎回 */
+  Data_buySedemption?: {
+    categories?: string[];
+    series?: Array<{
+      name?: string;
+      data?: (number | null)[];
+    }>;
+  };
+  /** 阶段收益率 */
+  syl_1y?: string;
+  syl_3y?: string;
+  syl_6y?: string;
+  syl_1n?: string;
+  /**
+   * 同类基金：二维数组，内层每项为 `"代码_名称_数值"` 拼接串
+   * （如 `"001480_财通成长优选混合A_472.06"`）。
+   * 注意上游用单引号字面量，Node 端经 jsVars 的单引号兜底归一后才能解析。
+   */
+  swithSameType?: string[][];
+}
+
+/** 把 `"marketId.code"`（如 `"0.300308"`）拆成 `{marketId, code}`。 */
+function splitMarketCode(s: string): FundHolding {
+  const dot = s.indexOf('.');
+  if (dot < 0) return { code: s, marketId: '' };
+  return { marketId: s.slice(0, dot), code: s.slice(dot + 1) };
+}
+
+function parseHoldings(raw: string[] | undefined): FundHolding[] {
+  if (!raw) return [];
+  return raw
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map(splitMarketCode);
+}
+
+function parseBondHoldings(raw: string | undefined): FundBondHolding[] {
+  if (!raw) return [];
+  // 去空格 + 过滤空片段：上游若返回尾随逗号/空段（`"1.x,"`），
+  // 直接 split 会产出畸形的 `{code:'',marketId:''}`
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map(splitMarketCode);
+}
+
+function parseAssetAllocation(raw: FundProfileRaw['Data_assetAllocation']): FundAssetAllocation[] {
+  if (!raw?.categories?.length || !raw?.series) return [];
+  const stockData = seriesData(raw.series, '股票占净比');
+  const bondData = seriesData(raw.series, '债券占净比');
+  const cashData = seriesData(raw.series, '现金占净比');
+  const otherData = seriesData(raw.series, '其他占净比');
+  const netAssetData = seriesData(raw.series, '净资产');
+
+  return raw.categories.map((date, i) => ({
+    date,
+    timestamp: reportDateToTs(date),
+    stockRatio: stockData[i] ?? 0,
+    bondRatio: bondData[i] ?? 0,
+    cashRatio: cashData[i] ?? 0,
+    otherRatio: otherData[i] ?? 0,
+    netAsset: netAssetData[i] ?? 0,
+  }));
+}
+
+function parsePositions(raw: Array<[number, number]> | undefined): FundPositionPoint[] {
+  if (!raw) return [];
+  return raw
+    // 过滤非有限时间戳（收编到共享的 isFiniteTs，与 nav/rank 同一份防御）
+    .filter((row) => isFiniteTs(row[0]))
+    .map(([ts, pos]) => ({
+      date: timestampToDate(ts),
+      timestamp: ts,
+      position: pos,
+    }));
+}
+
+function parseManagers(raw: FundProfileRaw['Data_currentFundManager']): FundManager[] {
+  if (!raw) return [];
+  return raw.map((m) => {
+    const star = m?.star;
+    return {
+      id: m?.id ?? '',
+      name: m?.name ?? '',
+      avatarUrl: m?.pic?.trim() || null,
+      star: typeof star === 'number' && Number.isFinite(star) ? star : null,
+      workTime: m?.workTime?.trim() || null,
+      fundSize: m?.fundSize?.trim() || null,
+      // power 与 Data_performanceEvaluation 同构（avr/categories/dsc/data），直接复用解析
+      power: parsePerformance(m?.power),
+    };
+  });
+}
+
+function parsePerformance(raw: FundProfileRaw['Data_performanceEvaluation']): FundPerformanceEvaluation | null {
+  if (!raw?.categories?.length) return null;
+  return {
+    overall: toFiniteNumberOrNull(raw.avr) ?? 0,
+    categories: raw.categories,
+    scores: raw.data ?? [],
+    descriptions: raw.dsc ?? [],
+  };
+}
+
+function parseHolderStructure(raw: FundProfileRaw['Data_holderStructure']): FundHolderStructure[] {
+  if (!raw?.categories?.length || !raw?.series) return [];
+  const instData = seriesData(raw.series, '机构持有比例');
+  const indvData = seriesData(raw.series, '个人持有比例');
+  const internalData = seriesData(raw.series, '内部持有比例');
+
+  return raw.categories.map((date, i) => ({
+    date,
+    timestamp: reportDateToTs(date),
+    institutionRatio: instData[i] ?? 0,
+    individualRatio: indvData[i] ?? 0,
+    internalRatio: internalData[i] ?? 0,
+  }));
+}
+
+function parseScaleChanges(raw: FundProfileRaw['Data_fluctuationScale']): FundScaleChange[] {
+  if (!raw?.categories?.length || !raw?.series) return [];
+  return raw.categories.map((date, i) => ({
+    date,
+    scale: raw.series?.[i]?.y ?? 0,
+    mom: raw.series?.[i]?.mom ?? '',
+  }));
+}
+
+function parseBuySedemption(raw: FundProfileRaw['Data_buySedemption']): FundBuySedemption[] {
+  if (!raw?.categories?.length || !raw?.series) return [];
+  const buyData = seriesData(raw.series, '期间申购');
+  const sellData = seriesData(raw.series, '期间赎回');
+  // 上游 series 名是「总份额」，此前误写为「期末总份额」导致 total 恒为 0
+  const totalData = seriesData(raw.series, '总份额');
+
+  return raw.categories.map((date, i) => ({
+    date,
+    timestamp: reportDateToTs(date),
+    buy: buyData[i] ?? 0,
+    sell: sellData[i] ?? 0,
+    total: totalData[i] ?? 0,
+  }));
+}
+
+function parseStageReturns(raw: FundProfileRaw): FundStageReturns {
+  return {
+    oneMonth: toFiniteNumberOrNull(raw.syl_1y),
+    threeMonth: toFiniteNumberOrNull(raw.syl_3y),
+    sixMonth: toFiniteNumberOrNull(raw.syl_6y),
+    oneYear: toFiniteNumberOrNull(raw.syl_1n),
+  };
+}
+
+/**
+ * 解析单条同类基金串 `"代码_名称_数值"`。
+ * 代码取第一个 `_` 之前、数值取最后一个 `_` 之后，中间整段为名称
+ * （基金名一般不含 `_`，但用首/尾定位对极端情况更稳）。
+ */
+function parsePeerEntry(entry: unknown): FundSameTypePeer | null {
+  if (typeof entry !== 'string') return null;
+  const first = entry.indexOf('_');
+  if (first < 0) return null;
+  const code = entry.slice(0, first);
+  if (!code) return null;
+  const last = entry.lastIndexOf('_');
+  if (last > first) {
+    return {
+      code,
+      name: entry.slice(first + 1, last),
+      value: toFiniteNumberOrNull(entry.slice(last + 1)),
+    };
+  }
+  // 只有一个分隔符：code_name，无数值
+  return { code, name: entry.slice(first + 1), value: null };
+}
+
+function parseSameType(raw: FundProfileRaw['swithSameType']): FundSameType | null {
+  if (!raw?.length) return null;
+  const groups = raw
+    .map((group) =>
+      (Array.isArray(group) ? group : [])
+        .map(parsePeerEntry)
+        .filter((p): p is FundSameTypePeer => p !== null)
+    )
+    .filter((g) => g.length > 0);
+  return groups.length ? { groups } : null;
+}
+
+/**
+ * 获取基金深度资料（pingzhongdata 全量字段，一次请求）。
+ *
+ * 包含：前十大重仓股、资产配置、仓位测算、基金经理、业绩评价、
+ * 持有人结构、规模变动、申购赎回、阶段收益率、同类基金等。
+ *
+ * 数据源：`https://fund.eastmoney.com/pingzhongdata/{code}.js`
+ *
+ * @param code 基金代码（纯数字，如 `'000001'`）
+ *
+ * @example
+ * const profile = await sdk.fund.profile('000001');
+ * console.log(profile.holdings[0].code);    // "300308"
+ * console.log(profile.assetAllocation[0]);   // { date, stockRatio, bondRatio, ... }
+ * console.log(profile.performance.overall);  // 77.0
+ */
+export async function getFundProfile(
+  client: RequestClient,
+  code: string
+): Promise<FundProfile> {
+  const url = `${FUND_PINGZHONGDATA_URL}/${encodeURIComponent(code)}.js`;
+  const vars = await fetchJsVars<FundProfileRaw>(
+    url,
+    [
+      'fS_code',
+      'fS_name',
+      'fund_sourceRate',
+      'fund_Rate',
+      'fund_minsg',
+      'stockCodesNew',
+      'zqCodesNew',
+      'Data_assetAllocation',
+      'Data_fundSharesPositions',
+      'Data_currentFundManager',
+      'Data_performanceEvaluation',
+      'Data_holderStructure',
+      'Data_fluctuationScale',
+      'Data_buySedemption',
+      'syl_1y',
+      'syl_3y',
+      'syl_6y',
+      'syl_1n',
+      'swithSameType',
+    ],
+    { client }
+  );
+
+  return {
+    code: vars.fS_code ?? code,
+    name: vars.fS_name ?? null,
+    sourceRate: toFiniteNumberOrNull(vars.fund_sourceRate),
+    rate: toFiniteNumberOrNull(vars.fund_Rate),
+    minSubscription: toFiniteNumberOrNull(vars.fund_minsg),
+    holdings: parseHoldings(vars.stockCodesNew),
+    bondHoldings: parseBondHoldings(vars.zqCodesNew),
+    assetAllocation: parseAssetAllocation(vars.Data_assetAllocation),
+    positions: parsePositions(vars.Data_fundSharesPositions),
+    managers: parseManagers(vars.Data_currentFundManager),
+    performance: parsePerformance(vars.Data_performanceEvaluation),
+    holderStructure: parseHolderStructure(vars.Data_holderStructure),
+    scaleChanges: parseScaleChanges(vars.Data_fluctuationScale),
+    buySedemption: parseBuySedemption(vars.Data_buySedemption),
+    stageReturns: parseStageReturns(vars),
+    sameType: parseSameType(vars.swithSameType),
+  };
+}

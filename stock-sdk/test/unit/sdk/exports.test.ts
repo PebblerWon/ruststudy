@@ -1,0 +1,33 @@
+import { describe, it, expect } from 'vitest';
+
+describe('模块导出', () => {
+  it('should export StockSDK class', async () => {
+    const { StockSDK } = await import('../../../src/index');
+    expect(StockSDK).toBeDefined();
+    expect(new StockSDK()).toBeInstanceOf(StockSDK);
+  });
+
+  it('should export default', async () => {
+    const defaultExport = await import('../../../src/index');
+    expect(defaultExport.default).toBeDefined();
+  });
+
+  it('should export GetAllAShareQuotesOptions', async () => {
+    const module = await import('../../../src/index');
+    expect(module.StockSDK).toBeDefined();
+    // GetAllAShareQuotesOptions is a type checked at compile time.
+  });
+
+  it('should export indicator registry and error helpers', async () => {
+    const module = await import('../../../src/index');
+    expect(module.INDICATOR_REGISTRY).toBeDefined();
+    expect(module.getSdkErrorCode).toBeDefined();
+  });
+
+  it('should export calcChipDistribution from root and indicators subpath', async () => {
+    const root = await import('../../../src/index');
+    expect(root.calcChipDistribution).toBeDefined();
+    const indicators = await import('../../../src/indicators');
+    expect(indicators.calcChipDistribution).toBeDefined();
+  });
+});

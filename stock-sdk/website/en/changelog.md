@@ -1,0 +1,316 @@
+---
+pageClass: changelog-page
+---
+
+# Changelog
+
+This page records the release history of Stock SDK. v2.0.0 is an **architectural leap** — without adding data sources, it reworks the symbol model, data contract, API surface, request layer, and error system, and adds a CLI / MCP and subpath exports.
+
+## v2.4.6
+
+> Released: 2026-10-03
+
+### Added
+
+- **`klineFallback` switch for CN K-line fallback sources** ([#80](https://github.com/chengzuopeng/stock-sdk/issues/80), thanks [@zhrenyue](https://github.com/zhrenyue)): since 2.4.4, CN K-lines switch to Tencent and then Sina when Eastmoney fails, with no way to turn it off, so bulk downloads could trip the fallback sources' rate limits too. Pass `new StockSDK({ klineFallback: false })` to turn it off: `kline.cn` / `kline.cnMinute` (5/15/30/60-minute) and `kline.withIndicators` / `kline.signals` then request Eastmoney only, retry disconnects and timeouts per `retry` / `providerPolicies.eastmoney`, and throw the Eastmoney error when it fails. The default is `true`, so existing code behaves as before. Eastmoney's soft-limit `data:null` response is not retried and is thrown as `UPSTREAM_EMPTY` (it cannot be told apart from an unknown code). The constructor options type is now exported as `StockSDKOptions`.
+
+### Fixed
+
+- **`chips.cn` no longer switches to K-line fallback sources that lack turnover rates**: chip distribution is derived from turnover rates, which the Tencent and Sina fallbacks added in 2.4.4 don't provide. Previously, when Eastmoney failed, `chips.cn` switched to a fallback and silently returned rows whose stats were all `null`; it now always requests Eastmoney and throws the Eastmoney error when it fails.
+
+### Documentation
+
+- Request Governance has a new "CN K-line fallback sources" section, and Error Handling & Retry notes that a CN K-line `UPSTREAM_EMPTY` can also mean Eastmoney soft rate limiting.
+
+## v2.4.5
+
+> Released: 2026-09-29
+
+### Added
+
+- **Pagination for fund-flow rankings and intraday stock changes** ([#65](https://github.com/chengzuopeng/stock-sdk/issues/65), thanks [@iarjian](https://github.com/iarjian)): `fundFlow.rank` / `fundFlow.sectorRank` accept `page` / `pageSize` (1–100 per page, default 100), and `marketEvent.stockChanges(type?, options?)` gains a second argument with the same `page` / `pageSize` (1–5000 per page, default 100). Passing either one fetches just that page; passing neither keeps the previous fetch-everything behavior, and the return value is still an array. Fetching only the top 20 of the stock fund-flow ranking now takes 1 request instead of 50+. Invalid page numbers or sizes throw `InvalidArgumentError` before any request is sent. The CLI and the MCP tools `get_fund_flow_rank` / `get_sector_fund_flow_rank` / `get_stock_changes` support them too.
+
+### Fixed
+
+- **Hong Kong stock quotes switch to Tencent's real-time keys** ([#78](https://github.com/chengzuopeng/stock-sdk/issues/78), thanks [@ystarlongzi](https://github.com/ystarlongzi)): `quotes.hk` / `batch.hk` previously requested Tencent's `hk` quote keys, which serve delayed quotes; individual stocks now use the real-time `r_hk` keys. If a real-time key returns no usable row, the SDK retries with the original key, so the worst case matches the previous behavior. Letter-coded index keys such as `HSI` are unchanged.
+
+### Documentation
+
+- Synced stale method lists and counts: the CLI command list, README and the API / MCP overviews drop the retired `fund.estimate` and add `chips`, `kline.signals`, the per-stock and regulatory `marketEvent` methods, and `fund.profile` / `fund.theme.*`; the namespace method count is corrected to 93.
+- Filled in the release dates for v2.4.0–v2.4.4.
+
+## v2.4.4
+
+> Released: 2026-09-12
+
+### Added
+
+- **Regulatory fluctuation alerts `marketEvent.unusualFluctuation`** ([#76](https://github.com/chengzuopeng/stock-sdk/issues/76), thanks [@WJMA-GIT](https://github.com/WJMA-GIT)): exchange abnormal-price-fluctuation warnings with the rule text, triggered flag, cumulative deviation and direction; `triggered` narrows to already-triggered or approaching stocks. CLI and the MCP tool `get_unusual_fluctuation` are derived alongside.
+
+### Fixed
+
+- **A-share K-lines fall back when Eastmoney is limited** ([#75](https://github.com/chengzuopeng/stock-sdk/pull/75), thanks [@run-bigpig](https://github.com/run-bigpig)): when `push2his` drops the connection or returns `data:null`, the SDK now falls back through Tencent and Sina, benefiting `kline.cn` / `cnMinute` / `withIndicators`.
+- **Negative forward-adjusted prices from the Tencent fallback**: Tencent's `qfqday` yields negative prices for long-history high-growth symbols (measured: ~59% of sh600519 closes). Forward-adjusted series are now derived from the hfq series, linearly rescaled to the last unadjusted close. qfq is the default adjustment and the failure was silent, so negative prices would have corrupted indicators and backtests.
+
+## v2.4.3
+
+> Released: 2026-09-09
+
+### Fixed
+
+- **Real-time fund flow `quotes.fundFlow` / `get_fund_flow` returned an empty array** ([#74](https://github.com/chengzuopeng/stock-sdk/pull/74), thanks [@run-bigpig](https://github.com/run-bigpig)): Tencent's `ff_` quote keys have been retired (the upstream now answers `v_pv_none_match`), so the method switched to EastMoney's `push2delay` per-stock extended fields (`f135~f149`). Amounts stay in units of 10k CNY, net ratios are derived from turnover, and `timestamp` now carries the data update time. Note the source is a delayed mirror (every real-time `push2` node currently drops connections on this endpoint), so intraday values may lag.
+- **Sector changes `marketEvent.boardChanges` / `get_board_changes` returned empty sector-level fields** ([#73](https://github.com/chengzuopeng/stock-sdk/issues/73), thanks [@DrogueYANG](https://github.com/DrogueYANG) for the diagnosis): the upstream `getAllBKChanges` renamed its fields (`bkn/bkz/bkj/bkc` → `n/u/zjl/ct`, and the distribution moved from a `bkdf` object to a `ydl` array). The parser now reads the new fields with the old ones kept as a fallback; `topStock*` was never affected. Verified live: all 1003 rows went from empty to fully populated.
+
+## v2.4.2
+
+> Released: 2026-08-19
+
+### Fixed
+
+- **Sector list / constituents / fund-flow ranking failing to fetch** ([#71](https://github.com/chengzuopeng/stock-sdk/pull/71), thanks [@Cossack9989](https://github.com/Cossack9989)): EastMoney's bare `push2.eastmoney.com` measured 0/6 available, so `push2delay.eastmoney.com` was added to the host pool. It is a delayed mirror, so it sits after every real-time node as a last resort.
+
+### Documentation
+
+- **Per-dataset timing semantics documented** ([#68](https://github.com/chengzuopeng/stock-sdk/issues/68)): Dragon-Tiger, block trades and daily fund flow are post-close; margin lags one trading day; northbound net amounts are no longer disclosed live; the limit-up pool and intraday changes are real-time. MCP tool descriptions annotated too.
+- Docs nav: "Playground" became a "Demos" dropdown with two demo-site entries.
+
+## v2.4.1
+
+> Released: 2026-08-02
+
+### Breaking changes
+
+> Shipped as a patch release: the removed method was already **100% non-functional** because its upstream shut down (every call either threw or returned nulls), so removing it breaks no code that previously worked.
+
+- **Removed `fund.estimate` (intraday fund NAV estimate)**: the upstream `fundgz.1234567.com.cn` has shut down — every fund request now returns **HTTP 200 with an HTML error page** instead of JSONP data ([#64](https://github.com/chengzuopeng/stock-sdk/issues/64)). Alternative sources (`pingzhongdata`, `fundmobapi`) were evaluated and none serve intraday estimates, so the method was removed outright rather than left as an endpoint guaranteed to fail.
+
+  Affected public surface: SDK `sdk.fund.estimate()`, MCP tool `get_fund_estimate` (core tier, so the core tool count goes 27 → 26), CLI `fund estimate`, the `FundEstimate` type, and the reference to that tool in the `analyze_fund` skill.
+
+  **Migration**: for settled NAV (`nav` / `navDate`), use the last entry of `sdk.fund.navHistory(code)`. There is no replacement for the intraday estimate — it will return if a reliable source is found.
+
+  > The outage surfaced differently per environment: browsers threw `SdkError: fundgz JSONP script load failed`, while Node **silently returned an all-null result**, indistinguishable from the documented "QDII / non-trading day estimates may be null" case.
+
+## v2.4.0
+
+> Released: 2026-07-12
+
+This release lands the Top-15 fixes from the 2026-07 whole-project review (R7-1 ~ R7-15): symbol contracts, data robustness, browser concurrency safety, cache governance, and pagination performance.
+
+### Fixed
+
+- **Bare prefixes no longer swallow real US tickers (R7-1)**: `'USB'` / `'HKD'` are no longer mis-stripped into `US/B` / `HK/0000D`.
+- **"With or without prefix" now holds for quote codes (R7-2/R7-3)**: `quotes.*` normalize via `tryToTencentSymbols`; bare and prefixed (`hk00700` / `usBABA`) both work.
+- **US K-lines accept bare tickers (R7-4)**: `kline.us('AAPL')` resolves the exchange prefix automatically (cached).
+- **Search concurrency safety (R7-5)**: `sdk.search()` moved onto `core/jsVars`, fixing concurrent `v_hint` overwrites / hangs in the browser.
+- **jsVars stale-global protection (R7-10)**: fixes cross-request fund-data attribution.
+- **ATR recovers from dirty warm-up bars (R7-6)**: one null bar no longer leaves the whole ATR / KC series null forever.
+- **SAR skips invalid leading bars (R7-7)**: a null first bar no longer seeds at price 0 (frozen trend).
+- **Fund NAV / rank history dirty-row defense (R7-8)**: bad timestamps / missing fields are filtered per row instead of losing the whole result or emitting ghost rows.
+- **Truncated Tencent quote rows no longer fabricate zeros (R7-9)**: truncated rows are dropped (were fabricated as 0); HK `currency` gains a check.
+- **Datacenter symbol normalization covers all shapes (R7-12)**: `SH600519` / `600519.SH` / `1.600519` no longer silently return empty.
+- **Cross-instance cache leakage (R7-11)**: code lists / calendar / board maps are now instance-scoped.
+- **`evictLRU` empty-string key**: eviction no longer stalls once `''` is the LRU entry.
+- **Backtest input validation**: invalid `fee` (incl. per-side `{buy, sell}`), `initialCapital` or `positionSize` throws `InvalidArgumentError` instead of producing silent garbage reports ("0 drawdown with sign-flipped returns").
+- **Backtest null-hole bars**: `null` elements in `klines` are treated as invalid bars and skipped for `strategy` — the engine no longer throws bare `TypeError`s.
+- **`sortBy` numeric strings participate in ordering**: values like `'999999'` are normalized via `Number()` instead of sinking as non-finite and hiding the true maximum.
+
+### Behavior changes (read before upgrading)
+
+- **`FundNavPoint.nav`: `number` → `number | null`**; null-check before arithmetic.
+- **Invalid US tickers: silent empty array → `NotFoundError`.**
+- **Truncated Tencent quote rows: fabricated zeros → dropped rows.**
+- **Garbage symbols in dividend / dragonTiger / northbound: silent empty array → `InvalidSymbolError`.**
+- **`clearSharedCaches()` no longer covers instance-scoped caches** — use the new `sdk.clearCaches()`.
+- **`getSharedCache` warns on non-equivalent options**; use `configureSharedCache()` for runtime reconfig.
+- **Datacenter pagination is now concurrent (R7-14)**: 3-way waves by default; no RateLimiter by default — configure `rateLimit` if throttling matters.
+- **All-uppercase prefix + letters no longer strips (R7-1)**: `'USAAPL'` → `US/USAAPL`; use `usAAPL` / `AAPL.US` / a `market` hint.
+- **Backtest signals on invalid-price bars now defer** (previously silently dropped): a `buy`/`sell` emitted on a suspended / NaN bar fills at the next valid-price bar, so one-shot crossover signals are no longer lost; a pending sell left at end-of-data closes at the last valid price as a strategy exit.
+- **Backtest forced-close records are self-consistent**: `Trade` gains a `forced` flag; `exitIndex` now points at the last **valid-price** bar (same bar as `exitPrice`), settlement is booked at the exit bar — no more phantom fee dips across suspended tails.
+- **Backtest `maxDrawdown` baselines at initial capital**: the entry fee of a first-bar buy is no longer invisible (identical economics previously reported 2× different drawdowns depending on the entry bar).
+- **Strategy's third parameter renamed `history` → `series`**: it is the full array including future bars; renamed + documented against look-ahead bias (type-level parameter name only, no call-site breakage).
+- **`sortBy` `direction` is strictly validated**: anything other than `'asc'`/`'desc'` (e.g. `'ASC'`) throws `InvalidArgumentError` instead of silently sorting descending.
+
+### Added
+
+- **Hang Seng family & the three major US indices in `quotes` / `kline` (unified bare codes)**: adds `HSI` / `HSCEI` / `HSTECH` and `DJI` / `INX` / `IXIC`, one code on both ends (K-line previously needed a raw secid like `100.HSI`); `DJIA` and other real tickers are not hijacked, `HSTECH` is Tencent-`quotes`-only.
+- `StockSDK.clearCaches()`: clears all of this instance's internal caches.
+- `configureSharedCache(namespace, options)`: runtime reconfiguration of shared caches.
+- `tryToTencentSymbols(codes, market)` (`stock-sdk/symbols`): batch fault-tolerant normalization to Tencent quote keys.
+- `DatacenterQuery.concurrency`: wave size for datacenter pagination.
+- **5 MCP tools for block trades / margin trading**: `get_block_trade_market_stat` / `_detail` / `_daily_stat` / `get_margin_account_info` / `_target_list`.
+- **MCP Skills (Prompts) — 7 scenario analysis skills**: the server implements `prompts/list` + `prompts/get`; core 4 + full 3, scoped by `STOCK_SDK_MCP_PROMPTS`, read-only. See [AI Skills](/en/skills/).
+- **`get_kline_signals` + `sdk.kline.signals(symbol, options)`**: detects 14 technical signals (golden/death crosses, overbought/oversold, BOLL breakouts, SAR reversals); `maFast` / `maSlow` tunable.
+- **Full spec ↔ SDK contract tests (R7-15)**: method paths and MCP options keys are mechanically pinned; a `prompts-contract` was added for skills.
+- **Backtest engine upgrades** (`stock-sdk/screener`, see the new [screener docs page](/en/api/screener)): report gains `buyHoldReturn` (buy-and-hold benchmark) and `validBars` (0 means no bar yielded a valid close — wrong price field); options gain `positionSize` (fraction per buy), `fee: { buy, sell }` (asymmetric rates, e.g. A-share sell-side stamp tax) and `getDate` (trades carry `entryDate`/`exitDate`); the execution contract (same-bar-close fills / signal deferral / no lot-size constraint) is now fully documented.
+
+::: tip Long-lived processes should reuse a singleton SDK
+Since v2.4.0 instance-scoped caches are isolated per `StockSDK` instance (fixing cross-instance leakage). A "new StockSDK() per request" pattern makes every instance start cache-cold (the 6h code-list cache degrades to one fetch per request) — reuse a singleton in long-lived services.
+:::
+
+## v2.3.0
+
+> Released: 2026-07-06
+
+### Added
+
+- **Chip distribution `sdk.chips.cn / hk / us`** ([#57](https://github.com/chengzuopeng/stock-sdk/issues/57), thanks [@hawx1993](https://github.com/hawx1993) for the request): computed **locally** from daily K-lines + turnover rate (a TypeScript port of Eastmoney's front-end CYQ algorithm, no new data source) — per-day profit ratio, average cost, 90 / 70 cost ranges with concentration, and an optional 150-bucket **chip-peak histogram** via `includeHistogram`. Unit tests assert per-day, per-field golden parity against the original Eastmoney JS.
+  - Pure function `calcChipDistribution(klines, options)` is exported from `stock-sdk/indicators` for user-supplied K-lines; the `tail` option avoids O(N²) work in full-accumulation mode
+  - Conventions: `range` defaults to `120` (matches the Eastmoney app); `{ range: 0, adjust: '' }` reproduces akshare's `stock_cyq_em` output — see the [chips docs](/en/api/chips)
+  - CLI `stock-sdk chips cn 600519` and MCP tools `get_chip_distribution` (core toolset) / `get_hk_chip_distribution` / `get_us_chip_distribution` derive automatically
+- **Per-stock intraday changes `marketEvent.individualChanges` / `individualChangesHistory`** ([#54](https://github.com/chengzuopeng/stock-sdk/issues/54), thanks [@hawx1993](https://github.com/hawx1993) for the request): a single A-share stock's all-type change-event stream for one trading day (time / type / trigger price / change%), plus an N-day (1~60, default 7) aggregation over the trading calendar — per-day `available` flags, `coverage` of the actually-retrievable range, and `stats` keyed by raw type code (with Chinese labels inline).
+  - Data source is Eastmoney's per-stock push2ex endpoint (not covered by akshare); the server only retains roughly the last few weeks **with occasional per-date gaps** — always branch on the per-day `available`
+  - For a full 30-day view, combine with daily proxies — see the new guide [30-Day Per-Stock Changes Panorama](/en/guide/stock-changes-panorama)
+  - MCP tools `get_individual_stock_changes` / `get_individual_stock_changes_history` and the CLI commands derive automatically
+- **`marketEvent.stockChanges` multi-type & all**: `type` widens to `StockChangeType | StockChangeType[] | 'all'`; `'all'` fetches all 22 types in one call and auto-paginates by the server-reported total (can exceed 10k rows on a trading day).
+
+### Changed
+
+- **`StockChangeItem` field extension**: adds `typeCode` (raw server type code); `changeType` widens from `StockChangeType` to `StockChangeType | 'unknown'` (new server-side codes no longer lose data). Consumers doing exhaustive switches over `changeType` need an `'unknown'` branch.
+
+## v2.2.2
+
+> Released: 2026-07-04
+
+### Added
+
+- **Indicator `decimals` option**: rounding indicators (ma / macd / boll / kdj / rsi / wr / bias / cci / atr) accept `decimals?: number` to control output precision (e.g. `calcMA(closes, { periods: [5], decimals: 2 })`), available through the SDK, `kline.withIndicators` and MCP.
+
+### Changed
+
+- **Default indicator precision goes from 2 to 3 decimals** (based on [#55](https://github.com/chengzuopeng/stock-sdk/pull/55), thanks [@Ahaochan](https://github.com/Ahaochan)): MA curves of low-priced instruments (e.g. a 3-CNY ETF) no longer look step-shaped. Note this is more than an extra digit: MACD / BOLL / BIAS consume internally rounded EMA/SMA intermediates, so some values differ from the old release at the **2nd** decimal even after re-rounding (roughly half of the MACD histogram values in measurement; golden/death crosses can shift by ±1 bar), and KC shifts with its internal EMA/ATR inputs; recalibrate backtests that snapshot indicator values. The 9 duplicated `round()` helpers are consolidated into one shared module.
+- obv / roc / dmi / sar / kc keep emitting raw floats (no rounding), matching previous behavior.
+
+## v2.2.1
+
+> Released: 2026-07-03
+
+### Added
+
+- **Special Eastmoney index support** (reworked from [#51](https://github.com/chengzuopeng/stock-sdk/pull/51), thanks [@wubh2012](https://github.com/wubh2012)): CSI indices recognized by code shape (`93xxxx` / `H`+5 digits, e.g. `930955`, `H30533`, secid prefix `2.`, via `kline.cn`); named indices `HSHCI` (Hang Seng Healthcare Index, `124.`, via `kline.hk`) and `GDAXI` (German DAX, `100.`, via the `kline.us('100.GDAXI')` raw-secid passthrough). The secid forms (`2.930955`, etc.) are valid inputs and round-trip.
+
+### Fixed
+
+- CSI indices were previously inferred as "starts with 9 → Shanghai", building secids like `1.930955` that returned silently empty klines; shape-based recognition fixes the whole family (including future codes) at once.
+
+### Changed
+
+- Special-index code shapes are **syntax-certain** classifications: conflicting hints and prefix / suffix assertions (`sh930955`, `hkHSHCI`, etc.) throw `InvalidSymbolError` with guidance, while explicit assertions like `usGDAXI` and `1.930955` keep their original meaning. `marketOf('HSHCI')` becomes `'HK'`, `marketOf('GDAXI')` becomes `'GLOBAL'`.
+- Unsupported paths fail fast uniformly (previously silent empty arrays or guaranteed-empty queries): `toTencentSymbol` / CLI `quote` / `fundFlow.individual` reject special indices, and auto-routing entries give a raw-secid hint for `GLOBAL` symbols. Known limitations: see the [symbols guide](/en/guide/symbols).
+
+## v2.2.0
+
+> Released: 2026-06-27
+
+### Added
+
+- **Theme fund API `sdk.fund.theme.*`**: browse funds by industry / concept theme, also derived to the CLI and MCP (`get_theme_list` / `get_theme_funds`).
+  - `getThemeList(options?)` — full theme list (industry / concept, with daily change and 1W / 1M / 3M / 6M / 1Y / 3Y / 5Y stage returns, sortable and paginated)
+  - `getThemeFunds(themeCode, options?)` — fund ranking within a theme (fund type, stage returns, latest NAV)
+
+## v2.1.0
+
+> Released: 2026-06-23
+
+### Added
+
+- **`sdk.fund.profile(code)`**: fetch a fund's deep profile in one request (the full set of Eastmoney pingzhongdata fields) — top-10 stock holdings, top-5 bond holdings, quarterly asset allocation, daily position estimates, fund managers (with star rating and ability scores), performance evaluation, holder structure, scale changes, purchase / redemption, stage returns (1 / 3 / 6-month, 1-year) and same-category peers. Shares the data source with `navHistory` / `rankHistory` (the same pingzhongdata file), and is also derived to the CLI (`fund profile`) and MCP (`get_fund_profile`).
+
+### Fixed
+
+- **Fund date alignment**: dates returned by `fund.navHistory` / `fund.rankHistory` / `fund.profile` were sliced from the UTC date and came out one day earlier than the actual trading day (pingzhongdata timestamps are Beijing midnight); now resolved in the Beijing timezone, verified against Tiantian Fund's authoritative NAV date (`jzrq`).
+- **`fetchJsVars` single-quote support**: on Node, single-quoted JS literals (e.g. `swithSameType`) now get a fallback parse to match the browser `<script>`-injection path, so such fields are no longer dropped on Node.
+
+## v2.0.0
+
+> Released: 2026-06-18
+>
+> v2.0.0 is the first stable release of v2, rolling up all the work since the beta. For the detailed changes and breaking-change notes see the `v2.0.0-beta.1` entry below; upgrading from v1? Read the [v1 → v2 migration guide](/en/guide/migration-v1-to-v2) first.
+
+### Since beta.1
+
+- The docs site now owns the primary domain `stock-sdk.linkdiary.cn`; v1 docs are archived at [v1.stock-sdk.linkdiary.cn](https://v1.stock-sdk.linkdiary.cn)
+- Wired up a dedicated Grafana Faro monitoring collect channel (app: `stock-sdk-docs-v2`) with sourcemap upload on production builds
+- Homepage red theme + live-quote Hero + full Playground rebuild
+- npm dist-tags: `latest` of `stock-sdk` now points to v2.0.0; the v1 stable line stays installable as `stock-sdk@legacy` (1.10.1)
+
+## v2.0.0-beta.1
+
+> This release rolls up the v2 stabilization work currently ahead of `origin/feature-v2`: the namespace-only API is now in place, request / time / symbol / provider correctness is tightened, CLI and MCP share one method-spec source, and the v2 docs site plus Playground are filled in.
+
+### Breaking changes
+
+- **v1 flat facade methods removed**: 80 compatibility methods such as `sdk.getXxx()` / `sdk.xxx()` are gone. The public SDK surface is now `sdk.<namespace>.<method>()`, plus the top-level `sdk.search(keyword)`.
+- **CLI / MCP contracts derive from one shared spec**: commands and MCP tools are generated from `src/spec/methods.ts`, so enums, defaults and argument shapes are validated from the same source of truth.
+
+### SDK correctness
+
+- **Request cancellation and timeout classification hardened**: external `AbortSignal`, timeout, custom `fetchImpl`, failure accounting and circuit-breaker half-open handling now distinguish cancellation, timeout and upstream failures more reliably.
+- **Time and date handling fixed**: `wallTimeToUTC` no longer drifts by one hour on DST transition days; date normalization and validation are shared across provider / SDK / CLI paths.
+- **Symbol parsing consolidated**: `normalizeSymbol` now handles hint precedence, dotted secids, HK / US / BSE / futures ambiguities and rejects cross-market conflicts instead of silently fetching the wrong market.
+- **Provider resilience improved**: upstream empty responses, pagination guards, direction validation, negative cache behavior, dividend typing and East Money secid edge cases now fail more predictably.
+- **Indicators and K-line stability improved**: `kline.withIndicators` has a safer warmup / refetch strategy; recursive-indicator slicing drift is fixed; `addIndicators` accepts docs-friendly shorthands such as `{ ma: [5, 20] }` and `{ rsi: { period: 14 } }`.
+
+### CLI and MCP
+
+- **`stock-sdk call` fixed**: namespaced method `this` binding is preserved, and callable paths are constrained by a shared walker and whitelist.
+- **MCP tools derive from the shared spec**: the tool surface is generated from the same method catalog, with `kline.withIndicators` kept as the hand-written adapter for nested indicator options.
+- **MCP argument validation is stricter**: unknown fields, type mismatches and optional object params passed as `null` now return `INVALID_ARGUMENT` at the boundary instead of leaking into SDK calls as `UNKNOWN`.
+- **stdio transport is quieter**: EPIPE / disconnect boundaries are handled more cleanly when MCP clients close the connection.
+
+### Performance and internals
+
+- **Indicator computation optimized**: SMA / BOLL / KDJ / signal-line style calculations use rolling implementations, with parity tests pinning value-level behavior.
+- **Less unnecessary K-line work**: minute K-lines are clipped server-side where possible; `withIndicators` short-circuits avoidable double requests; indicator computation now happens after slicing.
+- **Hot-path allocation reduced**: formatter keys, per-bar object rebuilds, quote double parsing and `sortBy` copies were trimmed.
+- **Parallel implementations removed**: symbol / time / parsing helpers, path walkers, East Money minute-K factories and date helpers are consolidated.
+
+### Docs site and Playground
+
+- **v2 docs site upgraded**: added the red-market visual theme, live-quote Hero, navigation updates and UI polish.
+- **Full Playground added**: `site-v2` now includes Playground components, method categories, code generation, runner logic, parameter overrides and bilingual pages.
+- **CLI docs filled in**: new Chinese and English CLI commands pages cover commands, flags, output formats and common flows.
+- **docs validation wired to v2**: `docs:meta` / `docs:check` / GitHub Pages builds now support `site-v2`, with forbidden tokens guarding against old broken examples.
+- **Examples aligned with implementation**: fixed old K-line period examples, string-array indicator examples, instance-screener examples, per-call signal examples, `--simple` docs and related drift.
+
+### Beta-stage notes
+
+- Unified units remain the v2 target contract. In this beta, runtime values still follow each provider's raw convention until per-source calibration lands.
+- Some legacy fields / type names may remain during beta to protect migration. New code should target the namespace API, the `Quote` union and pure-computation subpath entries.
+
+## v2.0.0-beta.0
+
+> 🧪 **First public beta** (`npm i stock-sdk@beta`): the v2.0.0 API surface is stable — try it and send feedback; minor adjustments are still possible before the final release. The items below are the breaking changes and new capabilities relative to v1.
+>
+> v2 is a **hard, single-track switch** — there is no `compat` entry point and no v1 legacy method aliases. When migrating from v1, read it alongside the [v1 → v2 migration guide](/en/guide/migration-v1-to-v2).
+
+### Breaking changes
+
+- **Namespaced API**: all 105 methods move from the flat `sdk.getXxx()` to namespaces `sdk.<ns>.<method>()` (e.g. `sdk.getFullQuotes()` → `sdk.quotes.cn()`, `sdk.getETFOptionDailyKline()` → `sdk.options.etf.dailyKline()`). There are **no compatibility aliases**; see the [migration guide](/en/guide/migration-v1-to-v2) and the [API Overview](/en/api/) for the full mapping.
+- **`Quote` discriminated union**: quote types are consolidated from separate interfaces (`FullQuote` / `HKQuote` / `USQuote` / `FundQuote` …) into a `Quote` union discriminated by `assetType`. Legacy type names may remain during beta to protect migration; new code should target `Quote` and narrow with `switch(q.assetType)`.
+- **`raw` field removed**: the `raw: string[]` field on 8 return types (which leaked implementation details) is deleted. The escape hatch becomes a provider-level `getXxxRaw()` debug function and no longer pollutes data objects.
+- **Unified units and conventions (target contract)**: `volume` targets **shares**; `amount` / `price` / market cap target the **major unit of each asset's quote currency** (CNY for A-shares, HKD for HK, USD for US, indicated by `currency`, with **no cross-currency conversion**); percentages are **percentage numbers** (e.g. `5.2` means 5.2%). Once fully landed, some numeric conventions will change relative to v1, so backtest / display logic must be recalibrated.
+  > ⚠️ Unit conversions (lots→shares ×100, 万→yuan ×10000, etc.) must be calibrated per source against real data; for now values are emitted in each source's raw convention and landed after calibration — subject to the final implementation.
+- **`timestamp`: `NaN` → `null`**: unparsable times change from `NaN` to `number | null`; null-checks move from `Number.isNaN(...)` to `=== null`. A `tz` (market time zone) field is also added to dated records.
+- **Legacy entries and signatures cleaned up**: v1 flat methods and the legacy `boolean` signatures `getAShareCodeList(boolean)` / `getUSCodeList(boolean)` are removed in favor of namespaced APIs and options-object signatures. Some legacy fields / type names may remain during beta to protect migration; the final source of truth is the type definitions and migration guide.
+- **Errors unified as `SdkError`**: the SDK now throws **only `SdkError`**, no longer leaking raw `TypeError` / `DOMException` / `RangeError`. Every error carries a unified `code`, with two new codes — `ABORTED` (external signal cancellation, distinct from `TIMEOUT`) and `UPSTREAM_ERROR` (upstream returned a structured error, distinct from the empty-data `UPSTREAM_EMPTY`). Importable from `stock-sdk/errors`.
+
+### New capabilities
+
+- **Unified symbol model**: `string` is first-class plus an optional `SymbolRef`; `normalizeSymbol` parses leniently (`sh600519` / `600519` / `600519.SH` / `00700` / `hk00700` / `AAPL` / `105.AAPL` / `rb2510` / `CFFEX.IF2412`, etc.). See [Symbols & code rules](/en/guide/symbols).
+- **CLI**: `stock-sdk <command>` fetches quotes / K-line / search right in the terminal (`quote` / `kline` / `search` / `mcp` …), with a zero-dependency hand-written arg parser and JSON output by default.
+- **MCP server**: `stock-sdk mcp` starts an MCP server in one command for AI tools like Cursor / Claude / Codex. A **zero-dependency, hand-written minimal MCP** (the `stdio + tools` subset) that does not pull in `@modelcontextprotocol/sdk`.
+- **Subpath exports**: new sub-entries `stock-sdk/indicators`, `stock-sdk/signals`, `stock-sdk/symbols`, `stock-sdk/screener`, `stock-sdk/cache`, `stock-sdk/errors`. Users of pure computation only (indicators / symbols / signals) no longer drag `RequestClient` and all providers into their bundle.
+- **Composable request layer**: `RequestClientOptions` / `GetOptions` gain `fetchImpl` (inject a custom fetch) and `signal` (external cancellation); client-level lifecycle `hooks` are added. See [Request governance](/en/guide/request-governance).
+- **Signal layer**: `calcSignals` (event detection for golden / death crosses, overbought / oversold, etc.) — pure computation, no network — exported from `stock-sdk/signals`.
+- **Screener + backtest**: `screen()` for local filtering plus `backtest()` for strategy backtesting, exported from `stock-sdk/screener`.
+- **Unified cache layer**: low-level cache primitives are exported (`MemoryCache` / `getSharedCache` / `cacheThrough` via the `stock-sdk/cache` subpath); the SDK uses them internally for the trading calendar, code lists and board mappings with tiered TTLs. Note: caches are currently module-level (shared across instances); injecting a `CacheStore` at construction time with per-endpoint policies is not implemented yet and is on the 2.0.0 roadmap.
+
+### Compatibility & baseline
+
+- **Zero runtime dependencies** maintained (both CLI and MCP are dependency-free); browser + Node 18+ dual-target; ESM + CJS dual-format.
+- Node baseline stays at `>=18` (`AbortSignal.any` has a runtime fallback).
+- **Hard single-track switch**: v1 code must be migrated wholesale per the [migration guide](/en/guide/migration-v1-to-v2); there is no smooth transition path.
+
+---
+
+> The v1.x changelog history lives in the v1 docs site. This page records releases starting from v2.0.0.

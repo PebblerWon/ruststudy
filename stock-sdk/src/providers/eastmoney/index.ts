@@ -1,0 +1,169 @@
+/**
+ * 东方财富数据源
+ */
+
+// A 股 K 线
+export {
+  getHistoryKline,
+  getMinuteKline,
+  type HistoryKlineOptions,
+  type MinuteKlineOptions,
+  type KlineSourceOptions,
+} from './aShareKline';
+
+// 港股 K 线
+export {
+  getHKHistoryKline,
+  getHKMinuteKline,
+  type HKKlineOptions,
+  type HKMinuteKlineOptions,
+} from './hkKline';
+
+// 美股 K 线
+export {
+  getUSHistoryKline,
+  getUSMinuteKline,
+  type USKlineOptions,
+  type USMinuteKlineOptions,
+} from './usKline';
+
+// 行业板块
+export {
+  getIndustryList,
+  getIndustrySpot,
+  getIndustryConstituents,
+  getIndustryKline,
+  getIndustryMinuteKline,
+  type IndustryBoardKlineOptions,
+  type IndustryBoardMinuteKlineOptions,
+} from './industryBoard';
+
+// 概念板块
+export {
+  getConceptList,
+  getConceptSpot,
+  getConceptConstituents,
+  getConceptKline,
+  getConceptMinuteKline,
+  type ConceptBoardKlineOptions,
+  type ConceptBoardMinuteKlineOptions,
+} from './conceptBoard';
+
+// 分红派送
+export { getDividendDetail } from './dividend';
+
+// 公募基金扩展数据（分红 / 历史净值 / 排名 / 深度资料 等）
+export {
+  getFundDividendList,
+  getFundNavHistory,
+  getFundRankHistory,
+  getFundProfile,
+} from './fund';
+
+// 国内期货 K 线
+export {
+  getFuturesHistoryKline,
+  extractVariety,
+  getFuturesMarketCode,
+  type FuturesKlineOptions,
+} from './futuresKline';
+
+// 全球期货
+export {
+  getGlobalFuturesSpot,
+  getGlobalFuturesKline,
+  type GlobalFuturesSpotOptions,
+  type GlobalFuturesKlineOptions,
+} from './futuresGlobal';
+
+// 中金所期权实时行情
+export {
+  getCFFEXOptionQuotes,
+  type CFFEXOptionQuotesOptions,
+} from './optionCffex';
+
+// 期权龙虎榜
+export { getOptionLHB } from './optionLhb';
+
+// 期货库存
+export {
+  getFuturesInventorySymbols,
+  getFuturesInventory,
+  getComexInventory,
+  type FuturesInventoryOptions,
+  type ComexInventoryOptions,
+} from './futuresInventory';
+
+// 通用 datacenter 请求器
+export {
+  fetchDatacenter,
+  fetchDatacenterList,
+  type DatacenterQuery,
+  type DatacenterResult,
+} from './datacenter';
+
+// 资金流向
+export {
+  getRealtimeFundFlow,
+  getIndividualFundFlow,
+  getMarketFundFlow,
+  getFundFlowRank,
+  getSectorFundFlowRank,
+  getSectorFundFlowHistory,
+  type FundFlowOptions,
+  type FundFlowRankOptions,
+} from './fundFlow';
+
+// 北向资金 / 沪深港通
+export {
+  getNorthboundMinute,
+  getNorthboundFlowSummary,
+  getNorthboundHoldingRank,
+  getNorthboundHistory,
+  getNorthboundIndividual,
+  type NorthboundHoldingRankOptions,
+  type NorthboundHistoryOptions,
+} from './northbound';
+
+// 涨停板 / 盘口异动
+export {
+  getZTPool,
+  getStockChanges,
+  getIndividualStockChanges,
+  assertCnStockSymbol,
+  getBoardChanges,
+  getUnusualFluctuation,
+} from './topicData';
+
+// 龙虎榜
+export {
+  getDragonTigerDetail,
+  getDragonTigerStockStats,
+  getDragonTigerInstitution,
+  getDragonTigerBranchRank,
+  getDragonTigerStockSeatDetail,
+} from './dragonTiger';
+
+// 大宗交易
+export {
+  getBlockTradeMarketStat,
+  getBlockTradeDetail,
+  getBlockTradeDailyStat,
+} from './blockTrade';
+export type { BlockTradeDateOptions } from '../../types/blockTrade';
+
+// 融资融券
+export { getMarginAccountInfo, getMarginTargetList } from './margin';
+
+// 龙虎榜：透出参数类型供 service / sdk.ts 引用
+export type { DragonTigerDateOptions } from '../../types/dragonTiger';
+
+// 主题基金
+export {
+  getThemeList,
+  getHotThemes,
+  getThemeFunds,
+  type GetThemeListOptions,
+  type GetHotThemesOptions,
+  type GetThemeFundsOptions,
+} from './fundTheme';

@@ -1,0 +1,208 @@
+# Symbols & Codes
+
+stock-sdk v2 funnels the whole "how do I write a ticker" question through a single entry point: `normalizeSymbol`. Whether you write `sh600519`, `600519`, `600519.SH`, or `{ code: '600519' }`, it all resolves to the same internal representation before being handed to each provider adapter.
+
+This page covers two things:
+
+1. How to pass symbols (SDK methods primarily take `string` / `string[]`; `normalizeSymbol` supports an optional `SymbolRef`);
+2. The fault-tolerant parsing rules, the pure-code ambiguities, and when a hint is **required**.
+
+## Input: string first-class
+
+Public SDK methods primarily take `string` / `string[]`. `SymbolRef` is the disambiguation input exposed by `stock-sdk/symbols` for `normalizeSymbol`:
+
+```ts
+type SymbolInput = string | SymbolRef;
+
+interface SymbolRef {
+  code: string;
+  market?: 'CN' | 'HK' | 'US' | 'GLOBAL';
+  assetType?: 'stock' | 'index' | 'fund' | 'bond' | 'futures' | 'option' | 'board';
+  exchange?: string; // 'SSE' | 'SZSE' | 'BSE' | 'HKEX' | 'NASDAQ' | ...
+}
+```
+
+A bare `string` is the preferred form and covers the vast majority of cases:
+
+```ts
+await sdk.quotes.cn(['sh600519', '000001']);
+await sdk.quotes.hk(['00700']);        // Hong Kong
+await sdk.quotes.us(['AAPL']);         // US
+```
+
+`SymbolRef` is not a separate system — it's a **"string with hints"**. Its `code` still goes through `normalizeSymbol`; it just carries extra `market` / `assetType` / `exchange` hints to disambiguate. When you need object hints, normalize first and then pass the explicit code string to the SDK method.
+
+```ts
+// Use SymbolRef only when a bare code can't be told apart
+normalizeSymbol({ code: '510300', assetType: 'fund' });
+await sdk.quotes.fund(['510300']);
+```
+
+## normalizeSymbol: unified fault-tolerant parsing
+
+`normalizeSymbol` is exported from `stock-sdk/symbols`. It's a pure function — zero network, works in both browser and Node. Providers reuse it where needed, and you can use it directly to normalize symbols yourself.
+
+```ts
+import { normalizeSymbol } from 'stock-sdk/symbols';
+
+normalizeSymbol('sh600519');
+// → { market: 'CN', exchange: 'SSE', assetType: 'stock', code: '600519', input: 'sh600519' }
+
+normalizeSymbol('AAPL');
+// → { market: 'US', exchange: 'US', assetType: 'stock', code: 'AAPL', input: 'AAPL' }
+```
+
+The returned `NormalizedSymbol` is the SDK's single internal representation:
+
+```ts
+interface NormalizedSymbol {
+  market: 'CN' | 'HK' | 'US' | 'GLOBAL';
+  exchange: string;  // the strong discriminator
+  assetType: 'stock' | 'index' | 'fund' | 'bond' | 'futures' | 'option' | 'board';
+  code: string;      // pure code, no prefix
+  variety?: string;  // futures variety (e.g. 'IF' / 'RB')
+  input: string;     // original input, for errors and debugging
+}
+```
+
+> `market` denotes the trading region / system; `exchange` is the strong discriminator. For example, overseas futures fall under `market: 'GLOBAL'` and are distinguished by `exchange` (COMEX / NYMEX / CBOT / LME …).
+
+### Resolution priority chain (first match wins)
+
+`normalizeSymbol(input, hint?)` tries the following rules in order and returns on the first match. When `hint` conflicts with `SymbolRef` fields, the **explicit input (SymbolRef) wins**.
+
+| Order | Rule | Example |
+|---|---|---|
+| 1 | Dotted form: Eastmoney secid / suffix / futures exchange / board | `1.600519`, `600519.SH`, `CFFEX.IF2412`, `90.BK0475` |
+| 2 | Letter prefix | `sh600519`, `sz000001`, `bj430047`, `hk00700`, `usAAPL` |
+| 3 | Special indices (by code shape / named, see below) | `930955`, `H30533`, `HSHCI`, `GDAXI` |
+| 4 | Pure digits | `600519`, `000001`, `00700` |
+| 5 | Bare futures contract with hint | `rb2510` (with `assetType:'futures'`) |
+| 6 | Pure letters → US stock | `AAPL`, `MSFT` |
+| 7 | Parse failure → `throw InvalidSymbolError` | `''`, `@@@` |
+
+### Per-market cheat sheet
+
+| Market | Accepted forms | Normalized result |
+|---|---|---|
+| A-share (Shanghai) | `sh600519`, `600519`, `600519.SH`, `1.600519` | `CN` / `SSE` / `600519` |
+| A-share (Shenzhen) | `sz000001`, `000001`, `000001.SZ`, `0.000001` | `CN` / `SZSE` / `000001` |
+| A-share (Beijing) | `bj430047`, `430047`, `920819` | `CN` / `BSE` / `430047` |
+| Hong Kong | `00700`, `hk00700`, `700`, `00700.HK`, `116.00700` | `HK` / `HKEX` / `00700` |
+| US | `AAPL`, `usAAPL`, `105.AAPL`, `106.BABA` | `US` / `US` (or NASDAQ / NYSE / AMEX) |
+| CN futures | `rb2510` (with hint), `CFFEX.IF2412` | `CN` / `SHFE`, `CFFEX` … |
+| Board | `90.BK0475` | `CN` / `SSE` / `board` |
+| Special index | `930955`, `H30533`, `2.930955`, `HSHCI`, `GDAXI` | `CN`/`CSI`, `HK`/`HSI`, `GLOBAL`/`DAX`, assetType always `index` |
+
+> Hong Kong codes shorter than 5 digits are zero-padded: `700` → `00700`, `hk700` → `00700`.
+> US tickers are upper-cased: `aapl` → `AAPL`.
+
+::: warning hk / us prefix + letter codes: stripping rules (tightened in v2.4.0)
+Letter rests inherently collide with **real US tickers** starting with `US*` / `HK*` (USB / USO / USFD / HKD…). Only two unambiguous shapes strip the prefix:
+
+- **Canonical**: lowercase prefix + uppercase-led rest — `usAAPL` / `usBRK.A` / `hkHSI`
+- **All-lowercase**: lowercase prefix with an all-lowercase rest of length ≥ 3 — `usaapl` / `hkhsi`
+
+Everything else (`USB`, `usb`, `HKD`, `USAAPL`) parses as a **full ticker** in the US market. For all-uppercase prefixed forms (`USAAPL`), use the canonical form, dotted `AAPL.US`, or a `market` hint. Digit rests (`hk00700` / `HK00700` / `us600519`) are unaffected and strip under any casing.
+:::
+
+### Special indices (CSI / Hang Seng / overseas)
+
+Some indices use dedicated Eastmoney secid market prefixes (`2` / `124` / `100`) instead of exchange-based inference. The SDK recognizes them via **code-shape rules plus a named registry**, and `assetType` is always `'index'`:
+
+| Family | Code shape / codes | Normalized result | Eastmoney secid |
+|---|---|---|---|
+| CSI indices (open family) | `93xxxx` (e.g. `930955`, `932000`, `931071`), `H` + 5 digits (e.g. `H30533`, `H11136`) | `CN` / `CSI` | `2.<code>` |
+| Hang Seng Healthcare Index | `HSHCI` | `HK` / `HSI` | `124.HSHCI` |
+| German DAX index | `GDAXI` | `GLOBAL` / `DAX` | `100.GDAXI` |
+
+```ts
+// CSI indices go through the CN pipeline (kline.cn / getHistoryKline just work)
+await sdk.kline.cn('930955', { startDate: '20240101', endDate: '20240105' });
+await sdk.kline.cn('H30533');
+
+// HSHCI belongs to the HK market, use the HK pipeline
+await sdk.kline.hk('HSHCI');
+
+// The secid forms (2.930955 / 2.H30533 / 124.HSHCI / 100.GDAXI) are valid inputs too
+normalizeSymbol('2.930955'); // → CN / CSI / index / 930955
+```
+
+Notes:
+
+- The code shape syntactically determines all three axes (`market` / `exchange` / `assetType`); conflicting hints throw `InvalidSymbolError` (e.g. `kline.cn('HSHCI')` — HSHCI belongs to the HK market, use `kline.hk` instead).
+- Special indices have no Tencent quote mapping — `toTencentSymbol` throws `InvalidArgumentError`; individual fund flow (`fundFlow.individual`) does not support special indices either.
+- The CSI family matches by code shape (an open set): a well-formed but nonexistent code (e.g. mistyping `H30533` as `H30553`) parses successfully and surfaces as empty upstream data rather than a local parse error — consistent with every other code family (e.g. `600520`).
+- `GDAXI` belongs to the `GLOBAL` market and has no formal kline entry point yet; as an escape hatch you can pass the raw secid via `sdk.kline.us('100.GDAXI')` (the response is labeled with the US model — `currency: 'USD'` and US/Eastern timezone — which is not accurate for DAX).
+
+## Pure-code inference and ambiguity
+
+When you supply only a pure code (no prefix, no suffix, no hint), inference follows these defaults:
+
+| Shape | Default inference | Exchange refinement |
+|---|---|---|
+| 6 pure digits | A-share stock | starts with `6/5/9` → SSE; `0/3` → SZSE; `4/8` or the `92` range → BSE; the `93` range → CSI index (see “Special indices” above) |
+| 5 / 4 pure digits | Hong Kong stock | zero-padded to 5 digits |
+| Pure letters | US stock | — |
+
+Pure-code inference is "most-common-wins", so **some cases simply cannot be told apart from the code alone** and require a hint or `SymbolRef` when calling `normalizeSymbol`.
+
+### Known ambiguities that require a hint
+
+**① Fund vs. stock (overlapping code ranges)**
+
+On-exchange fund / ETF code ranges overlap with stock code ranges; a bare code can't distinguish them, so declare the asset type explicitly:
+
+```ts
+// Without a hint this is treated as a stock
+normalizeSymbol('510300', { assetType: 'fund' });
+await sdk.quotes.fund(['510300']);
+```
+
+**② Index vs. stock (both 6 digits)**
+
+For example, `000001` is both the Shanghai Composite Index and Ping An Bank. A bare code defaults to stock; to mean the index, add a hint:
+
+```ts
+normalizeSymbol('000001', { assetType: 'index' });
+```
+
+**③ A/B-share five-digit codes instead of Hong Kong**
+
+A 5-digit pure code defaults to Hong Kong. If you truly mean a 5-digit A/B-share code, specify the market explicitly:
+
+```ts
+normalizeSymbol('90001', { market: 'CN' });
+```
+
+**④ Overseas futures bare contracts**
+
+Futures with `market: 'GLOBAL'` must provide an explicit `exchange`; they will not default to a domestic exchange:
+
+```ts
+normalizeSymbol('GC', { market: 'GLOBAL', exchange: 'COMEX' });
+// Missing exchange throws InvalidSymbolError
+```
+
+> Rule of thumb: **prefer an explicit form** (prefix / suffix / secid) whenever it expresses your intent (e.g. `sh000001` for the Shanghai Composite). Use a hint only when the system genuinely lacks enough information.
+
+## Parse failure: InvalidSymbolError
+
+Unparseable input throws `InvalidSymbolError` (a subclass of `SdkError`, with `code` `INVALID_SYMBOL`), carrying the original input for diagnosis:
+
+```ts
+import { normalizeSymbol } from 'stock-sdk/symbols';
+import { InvalidSymbolError } from 'stock-sdk/errors';
+
+try {
+  normalizeSymbol('');
+} catch (e) {
+  if (e instanceof InvalidSymbolError) {
+    console.log(e.code); // 'INVALID_SYMBOL'
+  }
+}
+```
+
+See [Errors & Retry](/en/guide/retry) for the full error system.
+
+> The type fields above are subject to the final implementation; the resolution priority and known ambiguities are stable conventions.

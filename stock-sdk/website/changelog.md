@@ -1,0 +1,316 @@
+---
+pageClass: changelog-page
+---
+
+# 更新日志
+
+本页记录 Stock SDK 的版本更新历史。v2.0.0 是一次**架构跃迁**——在不扩展数据源的前提下，重做了符号模型、数据契约、API 表面、请求层与错误体系，并新增 CLI / MCP 与 subpath 导出。
+
+## v2.4.6
+
+> 发布时间：2026-10-03
+
+### 新增
+
+- **A 股 K 线备用源开关 `klineFallback`**（[#80](https://github.com/chengzuopeng/stock-sdk/issues/80)，感谢 [@zhrenyue](https://github.com/zhrenyue)）：2.4.4 起 A 股 K 线在东方财富失败时会按腾讯、新浪顺序切换，但无法关闭，批量拉取时容易连带触发备用源的频控。现在可以用 `new StockSDK({ klineFallback: false })` 关闭：`kline.cn` / `kline.cnMinute`（5/15/30/60 分钟）以及 `kline.withIndicators` / `kline.signals` 只请求东方财富，连接断开、超时等按 `retry` / `providerPolicies.eastmoney` 重试，失败时直接抛出东方财富的错误。默认值为 `true`，不传时行为不变。东财软限流返回的 `data:null` 不会触发重试，以 `UPSTREAM_EMPTY` 抛出（与代码不存在无法区分）。构造参数类型同时导出为 `StockSDKOptions`。
+
+### 修复
+
+- **`chips.cn` 不再切换缺少换手率的 K 线备用源**：筹码分布依赖换手率，而 2.4.4 引入的腾讯、新浪备用源不提供换手率。此前东方财富失败时，`chips.cn` 会切到备用源，静默返回统计字段全为 `null` 的结果；现在始终只请求东方财富，失败时直接抛出东方财富的错误。
+
+### 文档
+
+- 请求治理新增「A 股 K 线备用源」一节；错误处理与重试补充说明：A 股 K 线的 `UPSTREAM_EMPTY` 也可能是东方财富软限流。
+
+## v2.4.5
+
+> 发布时间：2026-09-29
+
+### 新增
+
+- **资金流排名与盘口异动支持分页**（[#65](https://github.com/chengzuopeng/stock-sdk/issues/65)，感谢 [@iarjian](https://github.com/iarjian)）：`fundFlow.rank` / `fundFlow.sectorRank` 新增 `page` / `pageSize`（每页 1–100，默认 100）；`marketEvent.stockChanges(type?, options?)` 新增第二个参数，同样支持 `page` / `pageSize`（每页 1–5000，默认 100）。传其中任一即只请求这一页，都不传时保持原有的全量行为，返回值仍是数组。个股资金流排名只取前 20 条时，请求数从 50 多次降到 1 次。页码或每页条数不合法时在请求前抛 `InvalidArgumentError`。CLI 与 MCP 工具 `get_fund_flow_rank` / `get_sector_fund_flow_rank` / `get_stock_changes` 同步支持。
+
+### 修复
+
+- **港股个股行情改用腾讯实时行情键**（[#78](https://github.com/chengzuopeng/stock-sdk/issues/78)，感谢 [@ystarlongzi](https://github.com/ystarlongzi)）：`quotes.hk` / `batch.hk` 此前请求腾讯的 `hk` 行情键，拿到的是延时行情；个股改用实时键 `r_hk`。实时键没有返回有效数据时回退原键，最差与改动前一致。`HSI` 等字母指数键保持原样。
+
+### 文档
+
+- 同步过时的方法清单与计数：CLI 命令清单、README、API / MCP 总览去掉已下线的 `fund.estimate`，补上 `chips`、`kline.signals`、`marketEvent` 的个股异动与监管异动、`fund.profile` / `fund.theme.*`，命名空间方法数更正为 93。
+- 补齐 v2.4.0–v2.4.4 的发布日期。
+
+## v2.4.4
+
+> 发布时间：2026-09-12
+
+### 新增
+
+- **监管异动 `marketEvent.unusualFluctuation`**（[#76](https://github.com/chengzuopeng/stock-sdk/issues/76)，感谢 [@WJMA-GIT](https://github.com/WJMA-GIT)）：交易所股票交易异常波动预警，含规则原文、是否已触发、累计偏离值与方向；`triggered` 可只看已触发或逼近阈值的标的。同步派生 CLI 与 MCP 工具 `get_unusual_fluctuation`。
+
+### 修复
+
+- **A 股 K 线在东财受限时切换备用源**（[#75](https://github.com/chengzuopeng/stock-sdk/pull/75)，感谢 [@run-bigpig](https://github.com/run-bigpig)）：`push2his` 断连或返回 `data:null` 时按腾讯、新浪顺序回退，`kline.cn` / `cnMinute` / `withIndicators` 均受益。
+- **腾讯备用源前复权价为负**：腾讯 `qfqday` 对长历史高涨幅标的会算出负价（实测 sh600519 约 59% 收盘价为负），改为取 hfq 序列按末根不复权价线性缩放。qfq 是默认复权方式且失败静默，负价会直接污染指标与回测。
+
+## v2.4.3
+
+> 发布时间：2026-09-09
+
+### 修复
+
+- **实时资金流 `quotes.fundFlow` / `get_fund_flow` 返回空数组**（[#74](https://github.com/chengzuopeng/stock-sdk/pull/74)，感谢 [@run-bigpig](https://github.com/run-bigpig)）：腾讯 `ff_` 行情键已下线（上游返回 `v_pv_none_match`），改用东财 `push2delay` 个股行情扩展字段（`f135~f149`）。金额保持万元口径，净占比按成交额现算，`timestamp` 改为数据更新时刻。该源为延迟镜像（实时 `push2` 节点对此端点当前全部断连），盘中数据可能滞后。
+- **板块异动 `marketEvent.boardChanges` / `get_board_changes` 板块级字段全空**（[#73](https://github.com/chengzuopeng/stock-sdk/issues/73)，感谢 [@DrogueYANG](https://github.com/DrogueYANG) 定位）：上游 `getAllBKChanges` 字段改名（`bkn/bkz/bkj/bkc` → `n/u/zjl/ct`，分布由 `bkdf` 对象改为 `ydl` 数组），解析器改读新字段并保留旧字段回退；`topStock*` 未受影响。1003 条实测由全空恢复为全部有值。
+
+## v2.4.2
+
+> 发布时间：2026-08-19
+
+### 修复
+
+- **板块列表 / 成分股 / 资金流排行取数失败**（[#71](https://github.com/chengzuopeng/stock-sdk/pull/71)，感谢 [@Cossack9989](https://github.com/Cossack9989)）：东财 `push2.eastmoney.com` 主域实测 0/6 不可用，主机池新增 `push2delay.eastmoney.com`。它是延迟镜像，故排在全部实时节点之后兜底。
+
+### 文档
+
+- **补充各数据集时效口径**（[#68](https://github.com/chengzuopeng/stock-sdk/issues/68)）：龙虎榜 / 大宗交易 / 日度资金流为盘后数据，两融滞后一个交易日，北向沪深股通净额已停止实时披露，涨停池与盘口异动为盘中实时；MCP 工具描述同步标注。
+- 导航「演练场」改为「演示」下拉框，新增两个示例站入口。
+
+## v2.4.1
+
+> 发布时间：2026-08-02
+
+### 破坏性变更
+
+> 按 patch 版本发布：被移除的方法因上游下线已 **100% 不可用**（调用必然报错或返回空值），移除它不会让任何原本能跑通的代码失效。
+
+- **移除 `fund.estimate`（基金当日实时估值）**：上游 `fundgz.1234567.com.cn` 已下线——全量基金请求返回 **HTTP 200 + HTML 错误页**而非 JSONP 数据（[#64](https://github.com/chengzuopeng/stock-sdk/issues/64)）。已排查 `pingzhongdata` / `fundmobapi` 等替代源，均不提供盘中估值，故整体移除而非留一个必然失败的接口。
+
+  受影响的对外表面：SDK `sdk.fund.estimate()`、MCP 工具 `get_fund_estimate`（core 层，core 工具数 27 → 26）、CLI `fund estimate`、类型 `FundEstimate`，以及 `analyze_fund` 技能中对该工具的引用。
+
+  **迁移**：已结算净值（`nav` / `navDate`）改用 `sdk.fund.navHistory(code)` 取最后一项。盘中估值暂无替代方案——找到可靠数据源后会重新提供。
+
+  > 此前该接口的失效在两端表现不同：浏览器端抛 `SdkError: fundgz JSONP script load failed`，Node 端则**静默返回全 null**，与文档里「QDII / 非交易日估算可能为 null」的正常情况无法区分。
+
+## v2.4.0
+
+> 发布时间：2026-07-12
+
+本版本落地 2026-07 全工程 review 的 Top15 修复（R7-1 ~ R7-15）：符号契约、数据健壮性、浏览器并发安全、缓存治理与翻页性能。
+
+### 修复
+
+- **前缀不再吞真实美股 ticker（R7-1）**：`'USB'` / `'HKD'` 不再被误剥成 `US/B` / `HK/0000D`。
+- **行情 codes 带不带前缀均可（R7-2/R7-3）**：`quotes.*` 经 `tryToTencentSymbols` 归一，裸码与带前缀（`hk00700` / `usBABA`）都可查。
+- **美股 K 线支持裸 ticker（R7-4）**：`kline.us('AAPL')` 自动解析交易所前缀并缓存。
+- **搜索并发安全（R7-5）**：`sdk.search()` 走 `core/jsVars`，修浏览器端并发覆盖 / 挂起。
+- **jsVars 残留变量防护（R7-10）**：修请求间基金数据张冠李戴。
+- **ATR 暖机脏数据恢复（R7-6）**：一根 null bar 不再令整条 ATR / KC 永久 null。
+- **SAR 前导无效 bar（R7-7）**：首根 null 不再以 0 价播种冻结趋势。
+- **基金净值 / 排名历史脏行防御（R7-8）**：坏时间戳 / 缺字段逐行过滤，不再毁整个结果或产幽灵行。
+- **腾讯截断行不再伪造零值（R7-9）**：截断行整行丢弃（此前伪造成 0）；港股 `currency` 加校验。
+- **datacenter symbol 全形态归一（R7-12）**：`SH600519` / `600519.SH` / `1.600519` 不再静默返空。
+- **缓存跨实例串数据（R7-11）**：代码表 / 日历 / 板块映射改按实例隔离。
+- **`evictLRU` 空串键**：`''` 为 LRU 时不再淘汰停摆。
+- **回测入口参数校验**：`fee`（含 `{buy, sell}` 逐侧）、`initialCapital`、`positionSize` 非法值抛 `InvalidArgumentError`，不再产出「回撤 0 + 收益符号反转」的静默垃圾报告。
+- **回测 null 空洞 bar 防护**：`klines` 含 `null` 元素按无效 bar 处理且不进 `strategy`，引擎不再抛裸 `TypeError`。
+- **`sortBy` 字符串数值参与排序**：`'999999'` 等字符串数值经 `Number()` 归一，不再被当非有限值沉底而漏掉真实最大值。
+
+### 行为变更（升级请注意）
+
+- **`FundNavPoint.nav`：`number` → `number | null`**；算术前判空。
+- **美股 K 线无效 ticker：空数组 → `NotFoundError`**。
+- **腾讯截断行：伪造 0 → 整行丢弃**。
+- **dividend / dragonTiger / northbound 垃圾 symbol：空数组 → `InvalidSymbolError`**。
+- **`clearSharedCaches()` 不再覆盖实例级缓存**——用新增 `sdk.clearCaches()`。
+- **`getSharedCache` options 不等价时 `console.warn`**；运行时调整用 `configureSharedCache()`。
+- **datacenter 翻页并发化（R7-14）**：默认 3 路波次；默认无 RateLimiter，频控敏感配 `rateLimit`。
+- **全大写前缀 + 字母不再剥（R7-1）**：`'USAAPL'` → `US/USAAPL`；改用 `usAAPL` / `AAPL.US` / hint。
+- **回测无效价 bar 的信号改为挂起递延**（此前静默丢弃）：停牌 / NaN bar 上的 `buy`/`sell` 挂起到下一根有效价 bar 成交，一次性交叉信号不再永久丢失；数据走完前未成交的挂起 sell 按最后有效价平仓计策略出场。
+- **回测强平记录自洽**：`Trade` 新增 `forced` 标记；`exitIndex` 改指最后一根**有效价** bar（与 `exitPrice` 同根），结算记账在出场 bar、停牌尾部不再出现幽灵费差。
+- **回测 `maxDrawdown` 以初始资金为基线**：首根即买入时的入场手续费回撤不再不可见（同经济学此前因入场 bar 不同产出 2 倍差异）。
+- **回测策略第三参改名 `history` → `series`**：它是含未来 bar 的完整数组，改名 + 文档警示前视偏差（类型层参数名变更，不破坏调用）。
+- **`sortBy` 的 `direction` 严格校验**：非 `'asc'`/`'desc'`（如 `'ASC'`）抛 `InvalidArgumentError`，不再静默按降序。
+
+### 新增
+
+- **恒生系与美股三大指数接入 `quotes` / `kline`（统一裸码）**：新增 `HSI` / `HSCEI` / `HSTECH` 与 `DJI` / `INX` / `IXIC`，一码两端通用（此前 K 线需 raw secid `100.HSI`）；`DJIA` 等真 ticker 不被劫持，`HSTECH` 仅腾讯 `quotes`。
+- `StockSDK.clearCaches()`：清空本实例全部内部缓存。
+- `configureSharedCache(namespace, options)`：运行时重配共享缓存。
+- `tryToTencentSymbols(codes, market)`（`stock-sdk/symbols`）：行情键批量容错归一，返回 `{ keys, invalid }`。
+- `DatacenterQuery.concurrency`：datacenter 翻页并发波次大小。
+- **大宗交易 / 融资融券 5 个 MCP 工具**：`get_block_trade_market_stat` / `_detail` / `_daily_stat` / `get_margin_account_info` / `_target_list`。
+- **MCP Skills（Prompts）——7 个场景化分析技能**：server 实现 `prompts/list` + `prompts/get`，core 4 + full 3，`STOCK_SDK_MCP_PROMPTS` 控范围，全程只读。见 [AI Skills](/skills/)。
+- **`get_kline_signals` + `sdk.kline.signals(symbol, options)`**：识别 14 类技术信号（金叉死叉 / 超买超卖 / BOLL 突破 / SAR 反转），`maFast` / `maSlow` 可调。
+- **spec ↔ SDK 全量 contract 测试（R7-15）**：方法路径与 MCP options 键机械钉住；技能侧新增 `prompts-contract`。
+- **回测引擎增强**（`stock-sdk/screener`，见新增的 [screener 文档页](/api/screener)）：报告新增 `buyHoldReturn`（买入持有基准）与 `validBars`（有效价 bar 数，0 即取价字段不对）；选项新增 `positionSize`（仓位比例）、`fee: { buy, sell }`（买卖不对称费率，如 A 股卖侧印花税）、`getDate`（成交记录带 `entryDate`/`exitDate`）；同根收盘成交 / 信号挂起 / 无手数简化等成交契约全部文档化。
+
+::: tip 长驻进程建议复用单例 SDK
+v2.4.0 起实例级缓存按 `StockSDK` 实例隔离（修复跨实例串数据）。"每请求 `new StockSDK()`"的写法会让每个实例冷启缓存（代码表 6h 缓存失效为每请求一次）——长驻服务请复用单例。
+:::
+
+## v2.3.0
+
+> 发布时间：2026-07-06
+
+### 新增
+
+- **筹码分布 `sdk.chips.cn / hk / us`**（[#57](https://github.com/chengzuopeng/stock-sdk/issues/57)，感谢 [@hawx1993](https://github.com/hawx1993) 的需求反馈）：基于日 K 线 + 换手率**本地计算**（东方财富前端 CYQ 算法的 TypeScript 移植，零新增数据源），输出每日获利比例、平均成本、90 / 70 成本区间与集中度，`includeHistogram` 可附带 150 价格档的**筹码峰直方图**。单测与东财原版 JS 逐日逐字段黄金对拍。
+  - 纯函数 `calcChipDistribution(klines, options)` 从 `stock-sdk/indicators` 导出，可喂自备 K 线；`tail` 选项避免全量累计口径下的 O(N²) 计算
+  - 口径说明：`range` 默认 `120`（东财 App 显示口径），`{ range: 0, adjust: '' }` 可复现 akshare `stock_cyq_em` 输出；详见 [chips 文档](/api/chips)
+  - CLI `stock-sdk chips cn 600519` 与 MCP 工具 `get_chip_distribution`（core 工具集）/ `get_hk_chip_distribution` / `get_us_chip_distribution` 同步派生
+- **个股盘口异动 `marketEvent.individualChanges` / `individualChangesHistory`**（[#54](https://github.com/chengzuopeng/stock-sdk/issues/54)，感谢 [@hawx1993](https://github.com/hawx1993) 的需求反馈）：单只 A 股某交易日的全类型异动事件流（时间 / 类型 / 触发价 / 涨跌幅），以及近 N 天（1~60，默认 7）按交易日历聚合的异动历史——逐日 `available` 标注、`coverage` 覆盖范围、`stats` 按类型码计数（含中文标签）。
+  - 数据源为东财 push2ex 个股接口（akshare 未收录）；服务端仅保留约最近数周且**存在个别日期空洞**，请以逐日 `available` 为准
+  - 30 天完整视角的组合方案见新指南[「个股 30 天异动全景」](/guide/stock-changes-panorama)
+  - MCP 工具 `get_individual_stock_changes` / `get_individual_stock_changes_history` 与 CLI 命令同步派生
+- **`marketEvent.stockChanges` 支持多类型与全量**：`type` 参数放宽为 `StockChangeType | StockChangeType[] | 'all'`，`'all'` 一次拉取全部 22 类并按服务端总数自动翻页收全（交易日全类型总量可达上万条）。
+
+### 行为变更
+
+- **`StockChangeItem` 字段扩展**：新增 `typeCode`（服务端原始类型码）；`changeType` 类型由 `StockChangeType` 拓宽为 `StockChangeType | 'unknown'`（服务端新增未知类型码时不再丢数据）。对 `changeType` 做穷举 switch 的消费端需补 `'unknown'` 分支。
+
+## v2.2.2
+
+> 发布时间：2026-07-04
+
+### 新增
+
+- **指标输出精度选项 `decimals`**：舍入型指标（ma / macd / boll / kdj / rsi / wr / bias / cci / atr）的 options 新增 `decimals?: number`，按需指定输出小数位（如 `calcMA(closes, { periods: [5], decimals: 2 })`），SDK / `kline.withIndicators` / MCP 全链路可用。
+
+### 行为变更
+
+- **指标输出默认精度 2 位 → 3 位小数**（基于 [#55](https://github.com/chengzuopeng/stock-sdk/pull/55)，感谢 [@Ahaochan](https://github.com/Ahaochan)）：低价标的（如 3 元 ETF）的均线曲线不再因精度不足呈阶梯状。注意这不只是"多一位小数"：MACD / BOLL / BIAS 消费内部已舍入的 EMA/SMA 中间值，重舍回 2 位后部分数值在**第 2 位**即与旧版不同（实测约半数 MACD 柱值受影响，金叉/死叉可能偏移 ±1 根），KC 亦随内部 EMA/ATR 精度联动；依赖指标数值快照/缓存的回测请重新校准。9 份重复的 `round()` 已收编为共享模块（`decimals` 默认值单点维护）。
+- obv / roc / dmi / sar / kc 输出维持裸浮点（不舍入），与既有行为一致。
+
+## v2.2.1
+
+> 发布时间：2026-07-03
+
+### 新增
+
+- **东方财富特殊指数支持**（基于 [#51](https://github.com/chengzuopeng/stock-sdk/pull/51) 重构，感谢 [@wubh2012](https://github.com/wubh2012)）：中证指数按码形识别（`93xxxx` / `H`+5 位，如 `930955`、`H30533`，secid 前缀 `2.`，经 `kline.cn` 使用）；具名指数 `HSHCI`（恒生医疗保健指数，`124.`，经 `kline.hk`）与 `GDAXI`（德国 DAX，`100.`，经 `kline.us('100.GDAXI')` raw-secid 直通）。对应 secid 形（`2.930955` 等）成为合法输入且产出可回读。
+
+### 修复
+
+- 中证指数此前被按「9 开头 → 沪市」推断拼出 `1.930955` 类 secid，K 线静默返回空数组；按码形识别后全家族（含未来新码）一次修复。
+
+### 行为变更
+
+- 特殊指数码形为**语法确定**分类：矛盾 hint 与前缀 / 后缀断言（`sh930955`、`hkHSHCI` 等）抛 `InvalidSymbolError` 并给出指引；`usGDAXI`、`1.930955` 等显式断言保持原语义。`marketOf('HSHCI')` 变为 `'HK'`，`marketOf('GDAXI')` 变为 `'GLOBAL'`。
+- 不支持场景统一 fail-fast（此前静默空数组或必空查询）：`toTencentSymbol` / CLI `quote` / `fundFlow.individual` 对特殊指数报错，自动路由入口对 `GLOBAL` 符号给出 raw-secid 指引。已知限制见[符号指南](/guide/symbols)。
+
+## v2.2.0
+
+> 发布时间：2026-06-27
+
+### 新增
+
+- **主题基金 API `sdk.fund.theme.*`**：按行业 / 概念主题维度浏览基金，并同步派生到 CLI 与 MCP（`get_theme_list` / `get_theme_funds`）。
+  - `getThemeList(options?)` —— 全部主题列表（行业 / 概念，含日涨幅与近 1 周 / 1 月 / 3 月 / 6 月 / 1 年 / 3 年 / 5 年各阶段收益率，支持排序分页）
+  - `getThemeFunds(themeCode, options?)` —— 指定主题下的基金排行（含基金类型、各阶段收益率、最新净值）
+
+## v2.1.0
+
+> 发布时间：2026-06-23
+
+### 新增
+
+- **`sdk.fund.profile(code)`**：一次请求获取基金深度资料（东方财富 pingzhongdata 全量字段）——前十大重仓股、前五大债券、季度资产配置、每日股票仓位测算、基金经理（含星级与能力评分）、业绩评价、持有人结构、规模变动、申购赎回、阶段收益率（近 1 / 3 / 6 月、近 1 年）、同类基金。与 `navHistory` / `rankHistory` 同源（同一份 pingzhongdata 文件），并同步派生到 CLI（`fund profile`）与 MCP（`get_fund_profile`）。
+
+### 修复
+
+- **基金日期口径修正**：`fund.navHistory` / `fund.rankHistory` / `fund.profile` 返回的日期此前按 UTC 日期切片，比真实交易日早一天（pingzhongdata 的时间戳是北京时间零点）；改按北京时区取日期，已用天天基金权威净值日期（`jzrq`）校验。
+- **`fetchJsVars` 单引号兼容**：Node 端对单引号 JS 字面量（如 `swithSameType`）增加兜底解析，与浏览器 `<script>` 注入路径对齐，避免该类字段在 Node 端解析失败而丢失。
+
+## v2.0.0
+
+> 发布时间：2026-06-18
+>
+> v2.0.0 是 v2 的首个稳定版本，汇总了 beta 阶段以来的所有改动。详尽变更与破坏性说明见下方 `v2.0.0-beta.1` 条目；从 v1 升级请先阅读 [v1 → v2 迁移指南](/guide/migration-v1-to-v2)。
+
+### 自 beta.1 以来
+
+- 文档站接管主域 `stock-sdk.linkdiary.cn`；v1 文档归档至 [v1.stock-sdk.linkdiary.cn](https://v1.stock-sdk.linkdiary.cn)
+- 接入 Grafana Faro 监控独立 collect 通道（app: `stock-sdk-docs-v2`），生产构建上传 sourcemap
+- 首页红盘主题 + 实时行情 Hero + 完整 Playground 重做
+- npm dist-tag：`stock-sdk` 的 `latest` 指向 v2.0.0；v1 稳定版以 `stock-sdk@legacy`（1.10.1）继续可装
+
+## v2.0.0-beta.1
+
+> 本版汇总当前 `feature-v2` 尚未推送到远端的 v2 稳定化工作：完成命名空间单轨 API，修复多处请求 / 时间 / 符号 / provider 正确性问题，统一 CLI 与 MCP 的方法描述来源，并补齐 v2 文档站与 Playground。
+
+### 破坏性变更
+
+- **移除 v1 扁平门面方法**：删除 80 个 `sdk.getXxx()` / `sdk.xxx()` 兼容方法，仅保留 `sdk.<namespace>.<method>()` 与顶层 `sdk.search(keyword)`。调用方需按迁移指南改到命名空间 API。
+- **CLI / MCP 参数契约收敛到共享 spec**：命令与 MCP 工具由 `src/spec/methods.ts` 派生，枚举、默认值和参数形态按同一事实源校验；不再维护两套手写映射。
+
+### SDK 正确性
+
+- **请求取消与超时分类更稳**：修复外部 `AbortSignal`、超时、`fetchImpl` 自定义实现、失败记账与熔断半开恢复的边界行为，避免把主动取消、真实超时和上游失败混成同一种错误。
+- **时间与日期处理修复**：修正 `wallTimeToUTC` 在 DST 切换日的 1 小时偏差；统一日期归一与校验，减少 provider / SDK / CLI 之间的日期格式漂移。
+- **符号解析收口**：`normalizeSymbol` 处理 hint 优先级、点分 secid、港美股 / 北交所 / 期货等歧义；修复跨市场 hint 被静默忽略导致取到错误市场数据的问题。
+- **provider 韧性增强**：补上上游空响应、分页异常、direction 参数、负缓存、分红类型、东财 secid 等边界防护，减少空壳数据和裸异常泄漏。
+- **指标与 K 线稳定性提升**：`kline.withIndicators` 支持更稳的暖机与 refetch 策略；修复递归型指标切片漂移；`addIndicators` 支持 `{ ma: [5, 20] }`、`{ rsi: { period: 14 } }` 等文档简写。
+
+### CLI 与 MCP
+
+- **`stock-sdk call` 修复**：修正命名空间方法 `this` 绑定问题，并用共享 walker / 白名单机制限制可调用路径。
+- **MCP 工具派生化**：全量工具列表改为从共享 spec 派生，保留 `kline.withIndicators` 的嵌套指标配置手写适配。
+- **MCP 入参边界更严格**：未知字段、类型不符、optional object 传 `null` 会返回 `INVALID_ARGUMENT`，不再流入 SDK 变成 `UNKNOWN`。
+- **stdio 传输更稳**：补强 EPIPE / transport 边界处理，减少 MCP client 断开时的噪音错误。
+
+### 性能与内部结构
+
+- **指标计算优化**：SMA / BOLL / KDJ / 信号线等滑窗计算改为 rolling 实现，并用对拍测试钉住位级一致性。
+- **K 线取数减少无效工作**：分钟 K 线尽量服务端裁剪；`withIndicators` 在可短路场景避免双请求；指标计算改为先裁剪后计算。
+- **热路径小额分配优化**：减少 formatter key、逐 bar 对象重建、quote 双解析、`sortBy` 拷贝等热点开销。
+- **平行实现收编**：统一符号 / 时间 / 解析 helper，合并三套路径 walker，抽出东财分钟 K 线工厂与日期 helper。
+
+### 文档站与 Playground
+
+- **v2 文档站升级**：新增红盘主题、首页实时行情 Hero、导航与视觉打磨。
+- **完整 Playground**：新增 `site-v2` Playground 组件、方法分类、代码生成、运行器、参数覆盖与中英文页面。
+- **CLI 文档补齐**：新增中英文 CLI commands 页面，覆盖命令、参数、输出格式和常见用法。
+- **docs 校验接入 v2**：`docs:meta` / `docs:check` / GitHub Pages 构建链路支持 `site-v2`，并把旧错误示例加入 forbidden token 防回归。
+- **文档示例对齐实现**：修正旧的 K 线周期写法、字符串数组指标、实例选股器、单次 signal、`--simple` 等与实现不一致的示例。
+
+### Beta 阶段说明
+
+- 单位统一仍是 v2 的目标契约；当前 beta 运行值暂以各 provider 原始口径为准，单位换算会在逐源真实数据校准后落地。
+- 部分旧字段 / 旧类型名在 beta 阶段可能暂留以保护迁移；新代码建议面向命名空间 API、`Quote` 联合类型和 subpath 纯计算入口。
+
+## v2.0.0-beta.0
+
+> 🧪 **首个公开 Beta**（`npm i stock-sdk@beta`）：v2.0.0 的 API 表面已稳定，欢迎试用并反馈；正式版前仍可能有小幅调整。下列为相对 v1 的破坏性变更与新增能力。
+>
+> v2 采用**单轨硬切**——不提供 `compat` 兼容入口、不保留 v1 旧方法别名。从 v1 迁移请配合阅读 [v1 → v2 迁移指南](/guide/migration-v1-to-v2)。
+
+### 破坏性变更
+
+- **命名空间化 API**：105 个方法从扁平的 `sdk.getXxx()` 迁移到命名空间 `sdk.<ns>.<method>()`（如 `sdk.getFullQuotes()` → `sdk.quotes.cn()`、`sdk.getETFOptionDailyKline()` → `sdk.options.etf.dailyKline()`）。**无兼容别名**，完整映射见[迁移指南](/guide/migration-v1-to-v2)与 [API 总览](/api/)。
+- **`Quote` 可辨识联合**：行情类型从各自独立的接口（`FullQuote` / `HKQuote` / `USQuote` / `FundQuote` …）收敛为按 `assetType` 判别的联合类型 `Quote`。旧类型名在 beta 阶段可能暂留以保护迁移；新代码建议统一面向 `Quote` 并用 `switch(q.assetType)` 收窄。
+- **移除 `raw` 字段**：8 处返回值上的 `raw: string[]`（泄漏实现细节）全部删除。逃生舱改为 provider 层 `getXxxRaw()` 调试函数，不再混入数据对象。
+- **单位与口径统一（目标契约）**：`volume`（成交量）目标口径统一为**股**；`amount` / `price` / 市值目标口径统一为**各自计价货币的主单位**（A 股 = 人民币元、港股 = 港元、美股 = 美元，由 `currency` 标明，**不跨币种折算**）；百分比统一为**百分数**（如 `5.2` 表示 5.2%）。正式落地后，部分数值口径会相对 v1 发生变化，回测 / 展示逻辑需重新校准。
+  > ⚠️ 单位换算（手→股 ×100、万→元 ×10000 等）需用真实数据逐源校准，本期暂以各源原始口径输出，校准后落地——以最终实现为准。
+- **`timestamp`：`NaN` → `null`**：无法解析的时间由 `NaN` 改为 `number | null`，判空从 `Number.isNaN(...)` 改为 `=== null`。同时为日期类记录补齐 `tz`（市场时区）字段。
+- **清理旧入口与旧签名**：删除 v1 扁平方法与旧的 `boolean` 签名 `getAShareCodeList(boolean)` / `getUSCodeList(boolean)`，仅保留命名空间 API 与 options 对象签名。部分旧字段 / 旧类型名会在 beta 阶段暂留以保护迁移，最终以类型定义和迁移指南为准。
+- **错误统一为 `SdkError`**：对外**只抛 `SdkError`**，不再透出裸 `TypeError` / `DOMException` / `RangeError`。所有错误带统一 `code`，新增 `ABORTED`（外部 signal 主动取消，区别于 `TIMEOUT`）与 `UPSTREAM_ERROR`（上游返回结构化错误，区别于空数据 `UPSTREAM_EMPTY`）两个错误码。可从 `stock-sdk/errors` 导入。
+
+### 新增能力
+
+- **统一符号模型**：`string` 一等公民 + 可选 `SymbolRef`；`normalizeSymbol` 容错解析（`sh600519` / `600519` / `600519.SH` / `00700` / `hk00700` / `AAPL` / `105.AAPL` / `rb2510` / `CFFEX.IF2412` 等）。详见[符号与代码规则](/guide/symbols)。
+- **CLI**：`stock-sdk <command>` 在终端直接取行情 / K 线 / 搜索（`quote` / `kline` / `search` / `mcp` …），零依赖手写参数解析，默认 JSON 输出。
+- **MCP server**：`stock-sdk mcp` 一条命令启动 MCP 服务，供 Cursor / Claude / Codex 等 AI 工具接入。**零依赖手写最小 MCP**（`stdio + tools` 子集），不引入 `@modelcontextprotocol/sdk`。
+- **subpath 导出**：新增 `stock-sdk/indicators`、`stock-sdk/signals`、`stock-sdk/symbols`、`stock-sdk/screener`、`stock-sdk/cache`、`stock-sdk/errors` 子入口。只用纯计算（指标 / 符号 / 信号）的用户，bundle 不再拖入 `RequestClient` 与所有 provider。
+- **请求层可组合化**：`RequestClientOptions` / `GetOptions` 新增 `fetchImpl`（注入自定义 fetch）与 `signal`（外部取消信号）；client 级新增生命周期 `hooks`。详见[请求治理](/guide/request-governance)。
+- **信号层**：`calcSignals`（金叉 / 死叉 / 超买 / 超卖等事件识别），纯计算、零网络，从 `stock-sdk/signals` 导出。
+- **选股器 + 回测**：`screen()` 本地筛选 + `backtest()` 策略回测，从 `stock-sdk/screener` 导出。
+- **统一缓存层**：导出低层缓存原语（`MemoryCache` / `getSharedCache` / `cacheThrough`，经 `stock-sdk/cache` 子路径），SDK 内部用于交易日历、代码列表、板块映射的进程级缓存（TTL 分级）。注意：缓存目前为模块级共享（跨实例），「构造时注入 CacheStore 并按接口分级配置」尚未实现，列入 2.0.0 正式版 roadmap。
+
+### 兼容性与基线
+
+- **零运行时依赖**维持（CLI 与 MCP 均零依赖）；浏览器 + Node 18+ 双端；ESM + CJS 双格式。
+- Node baseline 维持 `>=18`（`AbortSignal.any` 带运行时降级）。
+- **单轨硬切**：v1 代码需按[迁移指南](/guide/migration-v1-to-v2)整体迁移，无平滑过渡路径。
+
+---
+
+> v1.x 的历史更新日志保留在 v1 文档站。本页自 v2.0.0 起记录。
