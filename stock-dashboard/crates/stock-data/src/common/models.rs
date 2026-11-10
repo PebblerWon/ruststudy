@@ -129,3 +129,22 @@ impl Adjust {
         self as u32
     }
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct MarketFundFlow {
+    pub date: String,
+    pub main_net_inflow: f64,
+    pub small_net_inflow: f64,
+    pub medium_net_inflow: f64,
+    pub large_net_inflow: f64,
+    pub super_large_net_inflow: f64,
+    pub main_net_inflow_percent: f64,
+    pub small_net_inflow_percent: f64,
+    pub medium_net_inflow_percent: f64,
+    pub large_net_inflow_percent: f64,
+    pub super_large_net_inflow_percent: f64,
+    pub sh_close: f64,
+    pub sh_change_percent: f64,
+    pub sz_close: f64,
+    pub sz_change_percent: f64,
+}

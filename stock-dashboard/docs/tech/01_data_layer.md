@@ -1,12 +1,12 @@
 # Phase 1：数据层技术实现
 
-> 所有接口规格均于 **2026-10-23 用 curl 实测验证**（贵州茅台 600519、上证指数等）。实现时如遇字段不符，以实测为准并回写本文。
+> 所有接口规格均于 **2026-10-23 用 curl 实测验证**（贵州茅台 600519、上证指数等；§1.8 北向资金为 **2026-11-10 补充实测**）。实现时如遇字段不符，以实测为准并回写本文。
 
 ## 1.1 模块概述
 
 ### 目标
 
-接入东方财富公开行情接口，提供**批量快照（自选/指数）、全市场列表、历史 K 线、当日分时**四类数据，配 TTL 缓存与轮询调度，为 UI 层提供唯一数据出口。
+接入东方财富公开行情接口，提供**批量快照（自选/指数）、全市场列表、历史 K 线、当日分时、北向资金（沪深港通）**五类数据，配 TTL 缓存与轮询调度，为 UI 层提供唯一数据出口。
 
 ### 模块划分与职责
 
@@ -797,6 +797,7 @@ impl EastmoneyClient {
 > `market_snapshot` 的 `total_amount`：`q.amount` 已是万元，在市约 5600 只，除以 1e4 转回亿元，注意别二次换算。
 >
 > ⚠️ 已踩过的坑（2026-11 修复）：
+>
 > 1. fs 误带裸 `m:0+t:81`（北交所+新三板），拉进 6700+ 僵尸品种，`f3="-"` 归 0 后全被计入平盘；
 > 2. total 1.2 万 > 100 页×pz=100=1 万，按 `fid=f3` 降序截断，下跌品种全排在未拉取的尾部 → down_count=0；
 > 3. UI 显示层 `format!("{:.2}亿", x.to_string())`，`{:.2}` 对字符串是截前 2 字符而非保留小数，1 万亿显示成 "10亿"。
@@ -933,11 +934,13 @@ impl<V: Clone> TtlCache<V> {
 
 TTL 分级（client 持有一个 `TtlCache<Value>` 存原始响应即可，单位换算幂等）：
 
-| key 前缀                          | TTL   |
-| --------------------------------- | ----- |
-| `ulist:{secids}`                  | 5s    |
-| `kline:{secid}:{klt}:{fqt}:{beg}` | 10min |
-| `clist:snapshot`                  | 60s   |
+| key 前缀                            | TTL   |
+| ----------------------------------- | ----- |
+| `ulist:{secids}`                    | 5s    |
+| `kline:{secid}:{klt}:{fqt}:{beg}`   | 10min |
+| `clist:snapshot`                    | 60s   |
+| `NB_SUMMARY`（北向当日概览）        | 5s    |
+| `NB_HIST:{channel}`（北向历史日线） | 30min |
 
 ### 1.6.3 polling.rs — 轮询服务（Phase 1 建骨架，Phase 3 接 UI）
 
@@ -1116,14 +1119,17 @@ mod kline_tests {
 
 ### 1.7.2 fixture 文件（放 `stock-data/tests/fixtures/eastmoney/`）
 
-| 文件                   | 内容来源                                             |
-| ---------------------- | ---------------------------------------------------- |
-| `ulist_quotes.json`    | §1.5.2 样例（林州重机/榕基软件两行）                 |
-| `ulist_suspended.json` | 自造停牌行（f2/f3… 均为 `"-"`）→ 断言 `is_suspended` |
-| `clist_page1.json`     | 实测 clist 一页 + `"total":3488` → 断言分页终止条件  |
-| `kline_qfq.txt`        | 茅台日线 CSV 若干行（含 2024 正价行 + 2001 负价行）  |
-| `kline_null_data.json` | `{"data":null}` → 断言返回 `Err(Api)` 或空           |
-| `trends.json`          | §1.5.4 样例 → 断言 preClose 与首点均价               |
+| 文件                   | 内容来源                                              |
+| ---------------------- | ----------------------------------------------------- |
+| `ulist_quotes.json`    | §1.5.2 样例（林州重机/榕基软件两行）                  |
+| `ulist_suspended.json` | 自造停牌行（f2/f3… 均为 `"-"`）→ 断言 `is_suspended`  |
+| `clist_page1.json`     | 实测 clist 一页 + `"total":3488` → 断言分页终止条件   |
+| `kline_qfq.txt`        | 茅台日线 CSV 若干行（含 2024 正价行 + 2001 负价行）   |
+| `kline_null_data.json` | `{"data":null}` → 断言返回 `Err(Api)` 或空            |
+| `trends.json`          | §1.5.4 样例 → 断言 preClose 与首点均价                |
+| `quota_realtime.json`  | §1.8.4 实测 4 行（北向金额 0.0 占位 + 南向真值）      |
+| `deal_new.json`        | §1.8.5 新口径行（2026-11-09 沪股通，金额字段全 null） |
+| `deal_old.json`        | §1.8.5 旧口径行（2024-08-16 沪股通，净买额全套有值）  |
 
 ### 1.7.3 wiremock 集成测试（`stock-data/tests/http_tests.rs`）
 
@@ -1184,13 +1190,643 @@ async fn smoke_index_quotes() {
 
 ### 1.7.5 测试清单汇总
 
-| 对象               | 断言要点                                             | 位置                         |
-| ------------------ | ---------------------------------------------------- | ---------------------------- |
-| `secid()`          | 沪/深映射、北交拒绝、长度与字符校验                  | eastmoney.rs 单测            |
-| `normalize`        | 元→万/亿、0/负值                                     | normalize.rs 单测            |
-| `parse_kline_line` | 字段顺序（收在高位前）、手→股、负价、分钟 close_time | eastmoney_types.rs 单测      |
-| `parse_quote_row`  | 归一正确、停牌行 `is_suspended`                      | wiremock + fixture           |
-| `phase()`          | §1.6.1 边界表 + 周末                                 | trading_hours.rs 单测        |
-| 分页终止           | `total` 达到 / 空页 / `max_pages` 兜底               | wiremock（构造两页 fixture） |
-| 空响应             | 200 + 空 body → `Err(Api)`（实测防风控回归）         | wiremock（空 body fixture）  |
-| 真实接口           | OHLC 有序、指数 8 条                                 | `#[ignore]` smoke test       |
+| 对象                 | 断言要点                                             | 位置                         |
+| -------------------- | ---------------------------------------------------- | ---------------------------- |
+| `secid()`            | 沪/深映射、北交拒绝、长度与字符校验                  | eastmoney.rs 单测            |
+| `normalize`          | 元→万/亿、0/负值                                     | normalize.rs 单测            |
+| `parse_kline_line`   | 字段顺序（收在高位前）、手→股、负价、分钟 close_time | eastmoney_types.rs 单测      |
+| `parse_quote_row`    | 归一正确、停牌行 `is_suspended`                      | wiremock + fixture           |
+| `phase()`            | §1.6.1 边界表 + 周末                                 | trading_hours.rs 单测        |
+| 分页终止             | `total` 达到 / 空页 / `max_pages` 兜底               | wiremock（构造两页 fixture） |
+| 空响应               | 200 + 空 body → `Err(Api)`（实测防风控回归）         | wiremock（空 body fixture）  |
+| 真实接口             | OHLC 有序、指数 8 条                                 | `#[ignore]` smoke test       |
+| `take_result_rows`   | success=false / result.data 缺失 → `Err(Api)`        | eastmoney_types 单测         |
+| `north_turnover_pct` | 正常占比、分母 0 防护                                | eastmoney.rs 单测            |
+| `parse_deal_row`     | 旧口径 `Some`、新口径 `None`、trim、枚举映射         | eastmoney_types 单测         |
+| 北向方法             | wiremock 按 reportName 分路由，北向 2 / 南向 2       | wiremock                     |
+| 真实接口（北向）     | QUOTA 4 条、北向成交额>0、近 20 日净买额全 None      | `#[ignore]` smoke test       |
+
+---
+
+## 1.8 北向资金数据（沪深港通）
+
+> 2026-11-10 用 curl 实测（接口 A 当日实时 + 接口 B 历史日线 + 2024-08 断供过渡期）。JS 参考实现：stock-sdk `getNorthboundFlowSummary`（RPT_MUTUAL_QUOTA + quoteColumns 行情拼接）。
+
+### 1.8.1 接口选型：两个报表分工
+
+北向资金不走 push2/push2his，而是东财**数据中心**接口，域名完全不同：
+
+```
+https://datacenter-web.eastmoney.com/api/data/v1/get
+```
+
+| 报表（reportName）        | 用途         | 时效          | 核心字段                         |
+| ------------------------- | ------------ | ------------- | -------------------------------- |
+| `RPT_MUTUAL_QUOTA`        | 通道当日概览 | 盘中实时      | 标的池涨跌家数、净买额、关联指数 |
+| `RPT_MUTUAL_DEAL_HISTORY` | 通道历史日线 | T+1（收盘后） | 成交总额、成交笔数、领涨股       |
+
+**两个接口都接入**：QUOTA 供盘中实时卡片（涨跌家数/关联指数），DEAL_HISTORY 供成交总额主数字与历史走势。想只用一个接口同时拿到"当日实时 + 净买额"不存在——见 §1.8.2，净买额已经死了。
+
+**通道枚举 MUTUAL_TYPE（两报表一致，实测确认）**
+
+| code | 含义         | 方向 | 历史条数 | 领涨股样例 |
+| ---- | ------------ | ---- | -------- | ---------- |
+| 001  | 沪股通       | 北向 | 2785     | 603366.SH  |
+| 002  | 港股通（沪） | 南向 | 2747     | 02335.HK   |
+| 003  | 深股通       | 北向 | 2309     | 002037.SZ  |
+| 004  | 港股通（深） | 南向 | 2280     | 02335.HK   |
+
+> ⚠️ 巨坑：002 **不是**深股通，是港股通（沪）。网上老教程多把 001/002 当"沪/深股通"配对，照抄必拿错数据。**北向 = 001 + 003**。QUOTA 报表带 `FUNDS_DIRECTION:"北向"/"南向"` 可直接校验；DEAL_HISTORY 只能靠枚举表。
+
+### 1.8.2 ⚠️ 2024-08-19 披露机制分水岭（必读）
+
+沪深交易所自 **2024-08-19** 起调整沪深港通信息披露机制：北向（沪股通/深股通）**实时与日度净买额停止披露**，只保留成交总额、成交笔数等。实测铁证（沪股通 filter=MUTUAL_TYPE="001"）：
+
+| 交易日     | FUND_INFLOW | NET_DEAL_AMT | BUY_AMT  | SELL_AMT | DEAL_AMT（万元） |
+| ---------- | ----------- | ------------ | -------- | -------- | ---------------- |
+| 2024-08-15 | 9629.62     | 8865.01      | 31345.92 | 22480.91 | 53826.83         |
+| 2024-08-16 | -1786.23    | -2568.22     | 22080.14 | 24648.36 | 46728.50         |
+| 2024-08-19 | null        | null         | null     | null     | 46129.34         |
+| 2026-11-09 | null        | null         | null     | null     | 102043.18        |
+
+结论：
+
+- **历史净买额只到 2024-08-16 为止**，与新口径成交额不可直接比较或连续累加（官方口径）；
+- 新口径唯一存活的金额字段是 `DEAL_AMT`（成交总额，万元），`DEAL_NUM`（笔数）照常；
+- QUOTA 报表的北向行金额字段（`netBuyAmt`/`dayAmtRemain`/`dayNetAmtIn`）盘中返回 **0.0 占位**（status=3），不是 null——**显示"北向净流入 0.00 亿"就是造假**，UI 禁止；
+- 南向（港股通）金额字段照常披露（`netBuyAmt` 实测 -135373.44 万），将来做南向面板不受影响。
+
+### 1.8.3 响应壳与通用约定
+
+datacenter 的壳与 push2 **不是一套**，`take_data()` 不适用：
+
+```json
+{
+  "version": "e4caf...",
+  "result": { "pages": 1, "data": [ ... ], "count": 4 },
+  "success": true,
+  "message": "ok",
+  "code": 0
+}
+```
+
+实测通用约定：
+
+1. **无 Referer 也能通**（只带 UA 实测通过）——datacenter 不像 push2 风控那么紧，复用现有 client 请求头即可；
+2. `columns` 支持裁剪（`columns=TRADE_DATE,DEAL_AMT` 实测有效），但 MVP 统一 `columns=ALL`，裁剪会让 null 语义与字段缺失混在一起；
+3. `filter` 是完整表达式且**括号必须成对**：`filter=(MUTUAL_TYPE="001")` 编码为 `filter=%28MUTUAL_TYPE%3D%22001%22%29`，漏掉 `%29` 右括号返回 `参数预处理错误（ANTLR InputMismatchException）`；
+4. `~` 与 `,` 在 URL query 中无需编码（quoteColumns 实测通过）；
+5. 字符串字段普遍带前导空格（`"INDEX_NAME":" 深证成指"`、`"LEAD_STOCKS_NAME":" 力鼎光电"`），解析统一 `trim()`；
+6. 日期统一 `"YYYY-MM-DD 00:00:00"`，截前 10 位 parse；
+7. **单位**：金额万元；⚠️ `HOLD_MARKET_CAP` 是**元**（实测 1.18e12）；家数是"只"；涨跌幅是 `%`。
+
+### 1.8.4 报表 A：RPT_MUTUAL_QUOTA（当日概览，实时）
+
+**请求参数**：
+
+| 参数                    | 值                                                                                                                                                                                                                 |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| reportName              | RPT_MUTUAL_QUOTA                                                                                                                                                                                                   |
+| columns                 | TRADE_DATE,MUTUAL_TYPE,BOARD_TYPE,MUTUAL_TYPE_NAME,FUNDS_DIRECTION,INDEX_CODE,INDEX_NAME,BOARD_CODE                                                                                                                |
+| quoteColumns            | status~07~BOARD_CODE,dayNetAmtIn~07~BOARD_CODE,dayAmtRemain~07~BOARD_CODE,dayAmtThreshold~07~BOARD_CODE,f104~07~BOARD_CODE,f105~07~BOARD_CODE,f106~07~BOARD_CODE,f3~03~INDEX_CODE~INDEX_f3,netBuyAmt~07~BOARD_CODE |
+| quoteType               | 0                                                                                                                                                                                                                  |
+| sortColumns / sortTypes | MUTUAL_TYPE / 1                                                                                                                                                                                                    |
+| pageSize                | 2000（全表仅 4 行，一页拉完，**无需 filter**）                                                                                                                                                                     |
+
+`quoteColumns` 语法：`行情字段~行情源~关联键[~别名]`——把行情系统的字段**拼接**进数据中心静态报表。`07` = 板块源（按 BOARD_CODE 关联），`03` = 指数源（按 INDEX_CODE 关联，`INDEX_f3` 是别名）。整段从 stock-sdk 原样抄，**不要手改**。
+
+**返回字段**（实测 2026-11-10 盘中）：
+
+| 字段                               | 含义                                                                                    | 单位 | 北向实测值                           |
+| ---------------------------------- | --------------------------------------------------------------------------------------- | ---- | ------------------------------------ |
+| TRADE_DATE                         | 当日                                                                                    | -    | "2026-11-10"（盘中即有今天）         |
+| MUTUAL_TYPE / MUTUAL_TYPE_NAME     | 枚举 / 中文名                                                                           | -    | 001 / "沪股通"                       |
+| FUNDS_DIRECTION                    | 方向                                                                                    | -    | "北向" / "南向"                      |
+| BOARD_TYPE / BOARD_CODE            | "沪港通"/"深港通" / BK0707 等                                                           | -    |                                      |
+| status                             | 实测南向=1、北向=3                                                                      | -    | 语义未确认，MVP 不使用               |
+| f104 / f105 / f106                 | 标的池涨 / 跌 / 平家数                                                                  | 只   | 沪 1063/528/55；深 1433/404/56       |
+| netBuyAmt                          | 当日净买额                                                                              | 万元 | **恒 0.0 占位**（南向有真值）        |
+| dayAmtRemain                       | 额度剩余                                                                                | 万元 | 0.0（"额度充足"时为 0）              |
+| dayNetAmtIn                        | ⚠️ 名义"当日资金流入"，南向实测 4200000.0 = 每日额度 420 亿，语义与名义不符，**不建模** | 万元 | 北向 0.0                             |
+| dayAmtThreshold                    | 额度阈值（未逐字段实测）                                                                | 万元 | 北向预期恒 0                         |
+| INDEX_CODE / INDEX_NAME / INDEX_f3 | 关联指数 / 实时涨跌幅                                                                   | %    | 000001 上证 / 399001 深成 / HSI 恒生 |
+
+> ⚠️ f104/f105/f106 是**通道标的池**口径，不是全市场：沪池合计 1646 只、深池 1893 只、南向池 667 只（2026-11-10 实测）。UI 若拿它当全市场涨跌家数展示即是造假；全市场涨跌用 §1.5.6 market_snapshot。
+
+**实测响应样例（北向行，可直接做 fixture）**：
+
+```json
+{
+  "TRADE_DATE": "2026-11-10 00:00:00",
+  "MUTUAL_TYPE": "001",
+  "BOARD_TYPE": "沪港通",
+  "MUTUAL_TYPE_NAME": "沪股通",
+  "FUNDS_DIRECTION": "北向",
+  "INDEX_CODE": "000001",
+  "INDEX_NAME": "上证指数",
+  "BOARD_CODE": "BK0707",
+  "status": 3,
+  "dayNetAmtIn": 0.0,
+  "dayAmtRemain": 0.0,
+  "f104": 1063,
+  "f105": 528,
+  "f106": 55,
+  "INDEX_f3": 0.08,
+  "netBuyAmt": 0.0
+}
+```
+
+### 1.8.5 报表 B：RPT_MUTUAL_DEAL_HISTORY（历史日线，T+1）
+
+**请求参数**：
+
+| 参数                    | 值                                                     |
+| ----------------------- | ------------------------------------------------------ |
+| reportName              | RPT_MUTUAL_DEAL_HISTORY                                |
+| columns                 | ALL                                                    |
+| filter                  | %28MUTUAL_TYPE%3D%22001%22%29（沪股通；深股通 003）    |
+| pageSize                | 想要几天传几天（≤2000），单页拉最近 N 条，**无需翻页** |
+| pageNumber              | 1                                                      |
+| sortColumns / sortTypes | TRADE_DATE / -1（降序，显式传）                        |
+
+**字段全表**（沪股通实测）：
+
+| 字段                                     | 含义                  | 单位   | 2024-08-16（旧口径） | 2026-11-09（新口径）   |
+| ---------------------------------------- | --------------------- | ------ | -------------------- | ---------------------- |
+| TRADE_DATE                               | 交易日                | -      | 有效                 | 有效（**最新为 T-1**） |
+| FUND_INFLOW                              | 当日资金流入          | 万元   | -1786.23             | null                   |
+| NET_DEAL_AMT                             | 当日净买额            | 万元   | -2568.22             | null                   |
+| BUY_AMT / SELL_AMT                       | 买 / 卖成交额         | 万元   | 22080.14 / 24648.36  | null                   |
+| QUOTA_BALANCE                            | 当日额度余额          | 万元   | 53786.23             | null                   |
+| ACCUM_DEAL_AMT                           | 历史累计净流入        | 万元   | 1008120.64           | null                   |
+| HOLD_MARKET_CAP                          | 持股市值              | **元** | 1181312830215.97     | null                   |
+| DEAL_AMT                                 | 成交总额              | 万元   | 46728.50             | 102043.18 ✅           |
+| DEAL_NUM                                 | 成交笔数              | 笔     | 3885742              | 5984738 ✅             |
+| QUOTA_BALANCE_TEXT                       | 余额文本              | -      | "53786.23"（数字串） | "额度充足"（类型漂移） |
+| LEAD_STOCKS_CODE / NAME / LS_CHANGE_RATE | 领涨股                | -      | 有效（北向 A 股）    | 有效                   |
+| INDEX_CLOSE_PRICE / INDEX_CHANGE_RATE    | 关联指数收盘 / 涨跌幅 | -      | 有效                 | 有效                   |
+
+**实测样例（新口径，2026-11-09 沪股通）**：
+
+```json
+{
+  "MUTUAL_TYPE": "001",
+  "TRADE_DATE": "2026-11-09 00:00:00",
+  "FUND_INFLOW": null,
+  "NET_DEAL_AMT": null,
+  "QUOTA_BALANCE": null,
+  "ACCUM_DEAL_AMT": null,
+  "BUY_AMT": null,
+  "SELL_AMT": null,
+  "LEAD_STOCKS_CODE": "603366.SH",
+  "LEAD_STOCKS_NAME": "日出东方",
+  "LS_CHANGE_RATE": 10.01,
+  "INDEX_CLOSE_PRICE": 3660.79,
+  "INDEX_CHANGE_RATE": 0.32,
+  "HOLD_MARKET_CAP": null,
+  "DEAL_AMT": 102043.18,
+  "QUOTA_BALANCE_TEXT": "额度充足",
+  "DEAL_NUM": 5984738
+}
+```
+
+### 1.8.6 模型设计（models.rs 新增）
+
+```rust
+/// 沪深港通通道（QUOTA / DEAL_HISTORY 两报表枚举一致，2026-11-10 实测）
+/// ⚠️ 002 是港股通（沪）不是深股通；北向 = Sg(001) + Sz(003)
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MutualType {
+    Sg,   // 001 沪股通（北向）
+    HkSg, // 002 港股通（沪）（南向）
+    Sz,   // 003 深股通（北向）
+    HkSz, // 004 港股通（深）（南向）
+}
+
+impl MutualType {
+    pub fn from_code(code: &str) -> Option<Self> {
+        match code {
+            "001" => Some(Self::Sg),
+            "002" => Some(Self::HkSg),
+            "003" => Some(Self::Sz),
+            "004" => Some(Self::HkSz),
+            _ => None,
+        }
+    }
+
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Sg => "001",
+            Self::HkSg => "002",
+            Self::Sz => "003",
+            Self::HkSz => "004",
+        }
+    }
+
+    /// 是否北向（外资经沪深港通买 A 股）
+    pub fn is_north(self) -> bool {
+        matches!(self, Self::Sg | Self::Sz)
+    }
+}
+
+/// 通道当日概览（RPT_MUTUAL_QUOTA，盘中实时）
+/// ⚠️ 北向行金额字段（net_buy_amt/remain_amt）为 0.0 占位（2024-08 停披露），
+///    仅涨跌家数与关联指数实时有效；南向行金额照常
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct NorthboundSummary {
+    pub channel: MutualType,
+    pub name: String,          // "沪股通"（响应带前导空格，解析已 trim）
+    pub direction: String,     // "北向" / "南向"
+    pub board: String,         // "沪港通" / "深港通"
+    pub up_count: u32,         // f104 标的池上涨家数（通道池口径，非全市场）
+    pub down_count: u32,       // f105
+    pub flat_count: u32,       // f106
+    pub net_buy_amt: f64,      // 万元；北向恒 0.0 占位，南向有效
+    pub remain_amt: f64,       // 万元；额度剩余，"额度充足"时为 0
+    pub index_code: String,    // 000001 / 399001 / HSI
+    pub index_name: String,
+    pub index_change_pct: f64, // %，实时（INDEX_f3）
+    pub trade_date: chrono::NaiveDate, // QUOTA 盘中即返回当天
+}
+
+/// 通道历史日线（RPT_MUTUAL_DEAL_HISTORY，T+1 出数）
+/// ⚠️ 2024-08-19 起净买额类字段 null → 解析为 None；禁用 0.0 兜底
+///    （null 是"停披露"的契约语义，与"真实 0"必须可区分）
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct NorthboundDaily {
+    pub channel: MutualType,
+    pub date: chrono::NaiveDate,
+    pub deal_amt: f64,                // 万元，成交总额（新旧口径唯一全存金额）
+    pub deal_num: u64,                // 成交笔数
+    pub net_deal_amt: Option<f64>,    // 万元，净买额（2024-08-19 起 None）
+    pub fund_inflow: Option<f64>,     // 万元，当日资金流入
+    pub buy_amt: Option<f64>,         // 万元，买入成交额
+    pub sell_amt: Option<f64>,        // 万元，卖出成交额
+    pub quota_balance: Option<f64>,   // 万元，当日额度余额
+    pub hold_market_cap: Option<f64>, // ⚠️ 元（唯一"元"单位），持股市值
+    pub lead_stock_code: String,      // 北向 "603366.SH" / 南向 "02335.HK"
+    pub lead_stock_name: String,
+    pub lead_stock_pct: f64,          // %，领涨股涨跌幅
+    pub index_close: f64,             // 关联指数收盘（沪：上证，深：深成，南向：恒指）
+    pub index_change_pct: f64,        // %
+}
+```
+
+设计点：
+
+- 金额用 `Option<f64>` 的都是"2024-08-19 后必为 null"的停披露字段；其余照旧 `f64_field` 归 0（笔数、指数价不存在 null 语义）；
+- `MutualType` 用封闭枚举而不是 String：枚举封闭（001-004），`from_code` 返回 None 时该行整体跳过（`filter_map`），比"未知 code 硬塞字符串"安全；
+- QUOTA 报表不建模 `dayNetAmtIn`/`dayAmtThreshold`/`status`：北向全 0 占位、南向语义存疑，MVP 用不上，少一个字段少一个坑。
+
+### 1.8.7 解析层（eastmoney_types.rs 新增）
+
+```rust
+use crate::common::models::MutualType;   // 文件顶部补充
+
+/// datacenter 壳：{version, result:{pages, data:[...], count}, success, message, code}
+/// ⚠️ 与 push2 的 {rc, data} 是两套壳，take_data() 不适用
+pub fn take_result_rows<'a>(v: &'a Value, api: &str) -> Result<Vec<&'a Value>> {
+    if !v.get("success").and_then(|s| s.as_bool()).unwrap_or(false) {
+        return Err(DataError::Api(format!(
+            "{api}: success=false, message={}",
+            str_field(v, "message")
+        )));
+    }
+    let arr = v
+        .pointer("/result/data")
+        .and_then(|d| d.as_array())
+        .ok_or_else(|| DataError::Api(format!("{api}: result.data 缺失")))?;
+    Ok(arr.iter().collect())
+}
+
+/// 可缺失数值：null / 缺失 / 非数 → None
+/// （与 f64_field 的"归 0"严格区分：专用于停披露字段，保住 null 语义）
+pub fn f64_field_opt(v: &Value, key: &str) -> Option<f64> {
+    match v.get(key) {
+        Some(Value::Number(n)) => n.as_f64(),
+        Some(Value::String(s)) => s.parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
+/// datacenter 日期 "2026-11-09 00:00:00" → NaiveDate（截前 10 位）
+pub fn dc_date(v: &Value, key: &str) -> Option<chrono::NaiveDate> {
+    str_field(v, key)
+        .get(..10)
+        .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+}
+
+/// QUOTA 行 → NorthboundSummary；枚举未知 → None（调用方 filter_map 跳过）
+pub fn parse_quota_row(row: &Value) -> Option<NorthboundSummary> {
+    let channel = MutualType::from_code(str_field(row, "MUTUAL_TYPE"))?;
+    Some(NorthboundSummary {
+        channel,
+        // 实测多个字符串字段带前导空格，统一 trim
+        name: str_field(row, "MUTUAL_TYPE_NAME").trim().to_string(),
+        direction: str_field(row, "FUNDS_DIRECTION").trim().to_string(),
+        board: str_field(row, "BOARD_TYPE").to_string(),
+        up_count: f64_field(row, "f104") as u32,
+        down_count: f64_field(row, "f105") as u32,
+        flat_count: f64_field(row, "f106") as u32,
+        net_buy_amt: f64_field(row, "netBuyAmt"), // 北向 0.0 占位，语义由调用方判定
+        remain_amt: f64_field(row, "dayAmtRemain"),
+        index_code: str_field(row, "INDEX_CODE").trim().to_string(),
+        index_name: str_field(row, "INDEX_NAME").trim().to_string(),
+        index_change_pct: f64_field(row, "INDEX_f3"),
+        trade_date: dc_date(row, "TRADE_DATE")?,
+    })
+}
+
+/// DEAL_HISTORY 行 → NorthboundDaily；新口径 null 字段 → None
+pub fn parse_deal_row(row: &Value) -> Option<NorthboundDaily> {
+    let channel = MutualType::from_code(str_field(row, "MUTUAL_TYPE"))?;
+    Some(NorthboundDaily {
+        channel,
+        date: dc_date(row, "TRADE_DATE")?,
+        deal_amt: f64_field(row, "DEAL_AMT"),
+        deal_num: f64_field(row, "DEAL_NUM") as u64,
+        net_deal_amt: f64_field_opt(row, "NET_DEAL_AMT"),
+        fund_inflow: f64_field_opt(row, "FUND_INFLOW"),
+        buy_amt: f64_field_opt(row, "BUY_AMT"),
+        sell_amt: f64_field_opt(row, "SELL_AMT"),
+        quota_balance: f64_field_opt(row, "QUOTA_BALANCE"),
+        hold_market_cap: f64_field_opt(row, "HOLD_MARKET_CAP"), // 元
+        lead_stock_code: str_field(row, "LEAD_STOCKS_CODE").trim().to_string(),
+        lead_stock_name: str_field(row, "LEAD_STOCKS_NAME").trim().to_string(),
+        lead_stock_pct: f64_field(row, "LS_CHANGE_RATE"),
+        index_close: f64_field(row, "INDEX_CLOSE_PRICE"),
+        index_change_pct: f64_field(row, "INDEX_CHANGE_RATE"),
+    })
+}
+```
+
+### 1.8.8 客户端方法（eastmoney.rs 增量，以当前实际代码为基准）
+
+> §1.4.1 骨架为初稿；当前实际代码已含 `cache: Arc<AnyTtlCach>` 字段。以下增量**以实际代码为基准**：
+
+```rust
+// ① 常量（放 UA 旁）
+const BASE_DC: &str = "https://datacenter-web.eastmoney.com/api/data/v1/get";
+
+// ② EastmoneyClient 新增字段 base_dc: String（与 base_q/base_his 同风格存完整路径前缀），
+//    new() / with_base_url() 同步三参化：
+pub fn new() -> Result<Self> {
+    Self::with_base_url(
+        "https://push2.eastmoney.com/api/qt".into(),
+        "https://push2his.eastmoney.com/api/qt".into(),
+        BASE_DC.into(),
+    )
+}
+// ⚠️ 三参化后，现有 wiremock 测试的 with_base_url(...) 调用点必须同步补第三参
+
+// ③ cache.rs 的 cache_prefix 新增：
+pub const NORTHBOUND_SUMMARY: &str = "NB_SUMMARY"; // TTL 5s
+pub const NORTHBOUND_HISTORY: &str = "NB_HIST";    // TTL 30min，key 拼 channel code
+
+// ④ 数据方法
+impl EastmoneyClient {
+    /// 通道当日概览（实时）：无 filter 一次拉全 4 条（全表仅 4 行），
+    /// 调用方按 MutualType::is_north() 筛北向
+    pub async fn northbound_summary(&self) -> Result<Vec<NorthboundSummary>> {
+        if let Some(hit) = self
+            .cache
+            .get::<Vec<NorthboundSummary>>(cache_prefix::NORTHBOUND_SUMMARY)
+            .await
+        {
+            return Ok((*hit).clone());
+        }
+        const COLUMNS: &str = "TRADE_DATE,MUTUAL_TYPE,BOARD_TYPE,MUTUAL_TYPE_NAME,\
+                               FUNDS_DIRECTION,INDEX_CODE,INDEX_NAME,BOARD_CODE";
+        const QUOTE_COLUMNS: &str = "status~07~BOARD_CODE,dayNetAmtIn~07~BOARD_CODE,\
+                                     dayAmtRemain~07~BOARD_CODE,dayAmtThreshold~07~BOARD_CODE,\
+                                     f104~07~BOARD_CODE,f105~07~BOARD_CODE,f106~07~BOARD_CODE,\
+                                     f3~03~INDEX_CODE~INDEX_f3,netBuyAmt~07~BOARD_CODE";
+        let url = format!(
+            "{}?reportName=RPT_MUTUAL_QUOTA&columns={}&quoteColumns={}&quoteType=0\
+             &sortColumns=MUTUAL_TYPE&sortTypes=1&pageSize=2000&source=WEB&client=WEB",
+            self.base_dc, COLUMNS, QUOTE_COLUMNS
+        );
+        let v = self.get_json(&url).await?;
+        let rows: Vec<NorthboundSummary> = raw::take_result_rows(&v, "northbound-summary")?
+            .iter()
+            .filter_map(|r| raw::parse_quota_row(r))
+            .collect();
+        self.cache
+            .insert(cache_prefix::NORTHBOUND_SUMMARY, rows.clone(), Duration::from_secs(5))
+            .await;
+        Ok(rows)
+    }
+
+    /// 通道历史日线（T+1）：单页 pageSize=days 拉最近 N 条，无需翻页
+    pub async fn northbound_history(
+        &self, channel: MutualType, days: usize,
+    ) -> Result<Vec<NorthboundDaily>> {
+        let key = format!("{}:{}", cache_prefix::NORTHBOUND_HISTORY, channel.code());
+        if let Some(hit) = self.cache.get::<Vec<NorthboundDaily>>(&key).await {
+            return Ok((*hit).clone());
+        }
+        // ⚠️ filter 括号必须成对；漏 %29 → "参数预处理错误"（实测踩过）
+        let url = format!(
+            "{}?reportName=RPT_MUTUAL_DEAL_HISTORY&columns=ALL&source=WEB&client=WEB\
+             &filter=%28MUTUAL_TYPE%3D%22{}%22%29&pageSize={}&pageNumber=1\
+             &sortColumns=TRADE_DATE&sortTypes=-1",
+            self.base_dc,
+            channel.code(),
+            days.clamp(1, 2000),
+        );
+        let v = self.get_json(&url).await?;
+        let rows: Vec<NorthboundDaily> = raw::take_result_rows(&v, "northbound-history")?
+            .iter()
+            .filter_map(|r| raw::parse_deal_row(r))
+            .collect();
+        self.cache
+            .insert(&key, rows.clone(), Duration::from_secs(30 * 60))
+            .await;
+        Ok(rows)
+    }
+}
+```
+
+### 1.8.9 缓存、轮询与 UI 卡片对接口径
+
+TTL：见 §1.6.2 新增的 `NB_SUMMARY`（5s）/ `NB_HIST:{channel}`（30min）两行。
+
+轮询策略：
+
+- summary 并入现有 quotes 轮询 fetch（盘中 5s），失败走既有退避，不发默认值（一次性请求发空值吞错的教训见 memory/03 集成文档）；
+- history 启动拉一次 + 收盘后（Afternoon→Closed 切换）重拉一次即可；MVP 甚至可以只在启动时拉。
+
+**总览页北向卡片字段口径**（替代当前硬编码 "0.54亿"；2026-11-10 定稿：主指标采用**北上成交占比**——净买额停披露后外资相对活跃度的标准替代口径）：
+
+| 卡片位置   | 数据                                                                | 来源                      |
+| ---------- | ------------------------------------------------------------------- | ------------------------- |
+| 主数字     | 北上成交占比（%）= 北上成交总额 / 两市成交额 × 100                  | `north_turnover_pct`      |
+| 主数字注脚 | "北上成交 XX.X 亿 · 2026-11-09"（绝对值放注脚不丢，日期 = **T-1**） | northbound_history(Sg/Sz) |
+| 副行       | 上涨 X / 下跌 Y = 沪 f104+深 f104 / f105+f105（实时）               | northbound_summary        |
+| 副行注脚   | "北向标的池口径"                                                    | -                         |
+
+**占比分母口径（两档）**——分子恒为 T-1 北上成交总额（沪 + 深 `deal_amt`，万元）：
+
+| 档位 | 分母                                                                                        | 口径一致性                                                           | 依赖           |
+| ---- | ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | -------------- |
+| MVP  | `MarketSnapshot.total_amount`（实时，亿元 × 1e4）                                           | 混搭：T-1 分子 × 今日分母，盘中占比偏低，**收盘后自动变准**，UI 注明 | 已有，零新依赖 |
+| 精确 | 上证指数 `1.000001` + 深证综指 `0.399106` 昨日 D1 K 线 `quote_volume`（元，/ 1e4 对齐万元） | T-1 分子 × T-1 分母，全自洽                                          | 需 klines 实装 |
+
+> ⚠️ 深市全口径是**深证综指 399106**，不是 `INDEX_SECIDS` 里现成的深证成指 399001——后者只有 500 只成分股，拿它做分母占比直接虚高约一倍。指数走显式 secid 常量，不经 `secid()` 规则函数（39 开头会被拒绝）。近似误差：上证指数含 B 股成交而分子是 A 股标的池，占比略偏低，MVP 接受。
+
+占比计算做成纯函数（放 eastmoney.rs 底部，与 `secid()` 同待遇），client 只出归一数据，组装在 UI/service：
+
+```rust
+/// 北上成交占比（%）：分子北上成交总额（万元），分母两市成交额（万元）
+/// MVP 分母 = MarketSnapshot.total_amount × 1e4；精确版 = 沪深综指昨日 K 线 quote_volume（元）/ 1e4
+pub fn north_turnover_pct(north_wan: f64, market_wan: f64) -> f64 {
+    if market_wan <= 0.0 { return 0.0; }
+    north_wan / market_wan * 100.0
+}
+```
+
+组装路径（MVP）：`northbound_history(Sg, 1)` + `northbound_history(Sz, 1)` 取最新两行 `deal_amt` 之和（万元），分母 `market_snapshot().total_amount × 1e4`（万元），喂给 `north_turnover_pct`。
+
+⚠️ 禁止显示"北向净流入/净买额"：数据 2024-08-19 已停披露，接口返回 0.0 占位，照显示就是造假。想看外资动向只能看成交总额/成交占比与标的池涨跌家数；南向净买额可以正常显示（数据照常披露）。
+
+### 1.8.10 测试方案与 fixture
+
+```rust
+// eastmoney_types.rs 底部
+#[cfg(test)]
+mod northbound_tests {
+    use super::*;
+    use crate::common::models::MutualType;
+
+    #[test]
+    fn mutual_type_codes() {
+        assert_eq!(MutualType::from_code("001"), Some(MutualType::Sg));
+        assert_eq!(MutualType::from_code("003"), Some(MutualType::Sz));
+        assert_eq!(MutualType::from_code("002"), Some(MutualType::HkSg));
+        assert_eq!(MutualType::from_code("999"), None);
+        assert!(MutualType::Sg.is_north() && MutualType::Sz.is_north());
+        assert!(!MutualType::HkSg.is_north() && !MutualType::HkSz.is_north());
+    }
+
+    #[test]
+    fn take_result_rows_rejects_failure_and_missing() {
+        let bad: Value = serde_json::from_str(
+            r#"{"success":false,"message":"参数错误","code":1,"result":null}"#,
+        ).unwrap();
+        assert!(matches!(take_result_rows(&bad, "t"), Err(DataError::Api(_))));
+        let empty: Value = serde_json::from_str(
+            r#"{"success":true,"result":{"pages":1}}"#,
+        ).unwrap();
+        assert!(matches!(take_result_rows(&empty, "t"), Err(DataError::Api(_))));
+    }
+
+    #[test]
+    fn parse_quota_north_row() {
+        // §1.8.4 实测北向行：金额 0.0 占位，家数/指数有效，名称带空格
+        let row: Value = serde_json::from_str(r#"{
+            "TRADE_DATE":"2026-11-10 00:00:00","MUTUAL_TYPE":"001","BOARD_TYPE":"沪港通",
+            "MUTUAL_TYPE_NAME":"沪股通","FUNDS_DIRECTION":"北向","INDEX_CODE":"000001",
+            "INDEX_NAME":"上证指数","BOARD_CODE":"BK0707","status":3,
+            "dayNetAmtIn":0.0,"dayAmtRemain":0.0,"f104":1063,"f105":528,"f106":55,
+            "INDEX_f3":0.08,"netBuyAmt":0.0}"#).unwrap();
+        let s = parse_quota_row(&row).unwrap();
+        assert_eq!(s.channel, MutualType::Sg);
+        assert!(s.channel.is_north());
+        assert_eq!((s.up_count, s.down_count, s.flat_count), (1063, 528, 55));
+        assert_eq!(s.net_buy_amt, 0.0);      // 占位值原样保留
+        assert_eq!(s.trade_date.to_string(), "2026-11-10");
+    }
+
+    #[test]
+    fn parse_deal_row_old_vs_new() {
+        // 旧口径（2024-08-16 实测）：净买额全套 Some
+        let old: Value = serde_json::from_str(r#"{
+            "MUTUAL_TYPE":"001","TRADE_DATE":"2024-08-16 00:00:00",
+            "FUND_INFLOW":-1786.23,"NET_DEAL_AMT":-2568.22,"QUOTA_BALANCE":53786.23,
+            "BUY_AMT":22080.14,"SELL_AMT":24648.36,"HOLD_MARKET_CAP":1181312830215.97,
+            "DEAL_AMT":46728.5,"DEAL_NUM":3885742,
+            "LEAD_STOCKS_CODE":"605118.SH","LEAD_STOCKS_NAME":" 力鼎光电",
+            "LS_CHANGE_RATE":10.01,"INDEX_CLOSE_PRICE":2879.43,"INDEX_CHANGE_RATE":0.07}"#).unwrap();
+        let d = parse_deal_row(&old).unwrap();
+        assert_eq!(d.net_deal_amt, Some(-2568.22));
+        assert_eq!(d.hold_market_cap, Some(1181312830215.97)); // 元，勿换算
+        assert_eq!(d.lead_stock_name, "力鼎光电");             // trim 生效
+
+        // 新口径（2026-11-09 实测）：停披露字段 None，成交总额存活
+        let new: Value = serde_json::from_str(r#"{
+            "MUTUAL_TYPE":"001","TRADE_DATE":"2026-11-09 00:00:00","FUND_INFLOW":null,
+            "NET_DEAL_AMT":null,"QUOTA_BALANCE":null,"ACCUM_DEAL_AMT":null,
+            "BUY_AMT":null,"SELL_AMT":null,"HOLD_MARKET_CAP":null,
+            "DEAL_AMT":102043.18,"DEAL_NUM":5984738,
+            "LEAD_STOCKS_CODE":"603366.SH","LEAD_STOCKS_NAME":"日出东方",
+            "LS_CHANGE_RATE":10.01,"INDEX_CLOSE_PRICE":3660.79,"INDEX_CHANGE_RATE":0.32}"#).unwrap();
+        let d = parse_deal_row(&new).unwrap();
+        assert_eq!(d.net_deal_amt, None);
+        assert_eq!(d.deal_amt, 102043.18);
+        assert_eq!(d.deal_num, 5984738);
+    }
+}
+```
+
+```rust
+// tests/http_tests.rs 追加（wiremock）
+#[tokio::test]
+async fn northbound_summary_parses_all_four_channels() {
+    let server = MockServer::start().await;
+    let fixture = std::fs::read_to_string("tests/fixtures/eastmoney/quota_realtime.json").unwrap();
+    Mock::given(method("GET"))
+        .and(path("/api/data/v1/get"))
+        .and(query_param("reportName", "RPT_MUTUAL_QUOTA"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(fixture))
+        .mount(&server)
+        .await;
+    // with_base_url 三参化后：第三参指向 mock 的 datacenter 路径
+    let client = EastmoneyClient::with_base_url(
+        "http://unused".into(),
+        "http://unused".into(),
+        format!("{}/api/data/v1/get", server.uri()),
+    ).unwrap();
+    let rows = client.northbound_summary().await.unwrap();
+    assert_eq!(rows.len(), 4);
+    assert_eq!(rows.iter().filter(|r| r.channel.is_north()).count(), 2);
+}
+
+#[tokio::test]
+#[ignore = "需要真实网络"]
+async fn smoke_northbound() {
+    let client = EastmoneyClient::new().unwrap();
+    let rows = client.northbound_summary().await.unwrap();
+    assert_eq!(rows.len(), 4);
+    assert!(rows.iter().filter(|r| r.channel.is_north())
+        .all(|r| r.up_count + r.down_count + r.flat_count > 0));
+
+    let hist = client.northbound_history(MutualType::Sg, 20).await.unwrap();
+    assert!(!hist.is_empty());
+    let latest = &hist[0];               // sortTypes=-1 首条即最新
+    assert!(latest.deal_amt > 0.0 && latest.deal_num > 0);
+    // 2024-08-19 停披露：近 20 日净买额全 None 是预期
+    assert!(hist.iter().all(|d| d.net_deal_amt.is_none()));
+}
+```
+
+```rust
+// eastmoney.rs 底部 tests mod 追加
+#[test]
+fn north_turnover_pct_rules() {
+    assert!((north_turnover_pct(15_000.0, 1_000_000.0) - 1.5).abs() < 1e-9);
+    assert_eq!(north_turnover_pct(15_000.0, 0.0), 0.0);   // 分母 0 防护（接口异常/空市）
+    assert_eq!(north_turnover_pct(0.0, 1_000_000.0), 0.0);
+}
+```
+
+### 1.8.11 踩坑清单（实测记录）
+
+1. **MUTUAL_TYPE 直觉陷阱**：002 是港股通（沪）不是深股通；老教程按 001=沪、002=深 配对，照抄拿错向。北向 = 001+003，QUOTA 报表可用 FUNDS_DIRECTION 兜底校验。
+2. **2024-08-19 分水岭**：北向净买额停披露。QUOTA 北向金额 0.0 占位（status=3），DEAL_HISTORY 金额 null。null 用 `Option`、0.0 占位原样保留并注释，别混。
+3. **filter 括号必须成对**：`(MUTUAL_TYPE="001")` 编码 `%28...%29`，漏 `%29` → `参数预处理错误（ANTLR InputMismatchException）`（实测踩过）。
+4. **单位混装**：金额万元、HOLD_MARKET_CAP 元、家数只、涨跌幅 %。成交总额万元 → UI 亿：除以 1e4。
+5. **字符串前导空格**：" 深证成指"、" 力鼎光电"、" 额度充足"，统一 trim。
+6. **DEAL_HISTORY 无当日行**：盘中查最新行 = T-1；UI 显示必须带数据日期，否则用户以为是今天。
+7. **quoteColumns 整段照抄**：语法 `字段~行情源~关联键[~别名]`，自行增删容易断链（`07` 源按 BOARD_CODE 关联、`03` 源按 INDEX_CODE 关联）。
+8. **f104/f105/f106 是通道标的池口径**（沪池 1646、深池 1893、南向池 667），不是全市场涨跌；全市场口径用 market_snapshot。
+9. **占比分母别拿 399001 深证成指**：500 只成分股指数不是深市全口径，深市全口径是深证综指 399106；MVP 混搭口径（T-1 分子 × 今日分母）盘中偏低属预期，UI 注明"收盘后为准"。

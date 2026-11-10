@@ -155,3 +155,31 @@ pub fn parse_timeline_line(line: &str) -> Option<TimelinePoint> {
         amount: norm::yuan_to_wan(p[6].parse().unwrap_or(0.0)),
     })
 }
+
+/// 2026-11-10,17267200000.0,-5156052992.0,-12111134720.0,5101621248.0,12165578752.0,1.15,-0.34,-0.80,0.34,0.81,3663.72,0.08,11241.54,0.86
+pub fn parse_market_fund_flow_kline(row_o: Option<&Value>) -> DataErrorResult<MarketFundFlow> {
+    if let Some(row) = row_o {
+        let arr: Vec<&str> = row.as_str().unwrap_or("").split(",").collect();
+        Ok(MarketFundFlow {
+            date: arr[0].to_string(),
+            main_net_inflow: arr[1].parse().unwrap_or(0.0),
+            small_net_inflow: arr[2].parse().unwrap_or(0.0),
+            medium_net_inflow: arr[3].parse().unwrap_or(0.0),
+            large_net_inflow: arr[4].parse().unwrap_or(0.0),
+            super_large_net_inflow: arr[5].parse().unwrap_or(0.0),
+            main_net_inflow_percent: arr[6].parse().unwrap_or(0.0),
+            small_net_inflow_percent: arr[7].parse().unwrap_or(0.0),
+            medium_net_inflow_percent: arr[8].parse().unwrap_or(0.0),
+            large_net_inflow_percent: arr[9].parse().unwrap_or(0.0),
+            super_large_net_inflow_percent: arr[10].parse().unwrap_or(0.0),
+            sh_close: arr[11].parse().unwrap_or(0.0),
+            sh_change_percent: arr[12].parse().unwrap_or(0.0),
+            sz_close: arr[13].parse().unwrap_or(0.0),
+            sz_change_percent: arr[14].parse().unwrap_or(0.0),
+        })
+    } else {
+        return Err(DataError::Api(
+            "parse_market_fund_flow_kline 数据为空".to_string(),
+        ));
+    }
+}

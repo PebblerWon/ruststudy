@@ -66,6 +66,26 @@ impl DataBridge {
         })
     }
 
+    /// 启动轮询：查询市场行情
+    pub fn start_polling_market_fund_flow(
+        &self,
+        tx: async_channel::Sender<stock_data::MarketFundFlow>,
+    ) -> PollingHandle {
+        let client = self.client.clone();
+        // spawn_polling 内部 tokio::spawn，必须在 runtime 上下文里调用
+
+        self.rt.block_on(async move {
+            spawn_polling(
+                move || {
+                    let client = client.clone();
+                    async move { client.get_market_fund_flow().await }
+                },
+                move |data| {
+                    let _ = tx.try_send(data);
+                },
+            )
+        })
+    }
     pub fn get_all_a_codes(
         &self,
         tx: async_channel::Sender<Arc<Vec<String>>>,

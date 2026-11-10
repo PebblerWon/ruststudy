@@ -11,7 +11,8 @@ use gpui_kit::{
     base::{StyledExt, h_flex, v_flex},
     *,
 };
-use stock_data::{IndexQuote, MarketSnapshot, PollingHandle};
+use stock_data::data::normalize::yuan_to_yi;
+use stock_data::{IndexQuote, MarketFundFlow, MarketSnapshot, PollingHandle};
 pub struct IndexSnapshot {
     pub code: String,         // 指数代码 000001.SH
     pub name: String,         // 指数名称：上证指数
@@ -24,10 +25,11 @@ pub struct OverviewPanel {
     /// 持有 bridge：保住 tokio runtime 生命周期（同 StockApp._bridge）
     _bridge: Arc<DataBridge>,
     snapshots: Vec<IndexSnapshot>,
-    polling_handle: PollingHandle,
+    polling_handle: Vec<PollingHandle>,
     theme: AppThemePalette,
     app_state: Entity<StockAppState>,
     market_snapshot: Option<MarketSnapshot>,
+    market_fund_flow: Option<MarketFundFlow>,
 }
 impl OverviewPanel {
     pub fn new(
@@ -36,12 +38,25 @@ impl OverviewPanel {
         app_state: Entity<StockAppState>,
     ) -> Self {
         let (tx, rx) = async_channel::unbounded::<Vec<IndexQuote>>();
-        let polling_handle = bridge.start_polling_index_quotes(tx);
+        let polling_handle1 = bridge.start_polling_index_quotes(tx);
         cx.spawn(async move |this, cx| {
             while let Ok(quotes) = rx.recv().await {
                 let _ = this.update(cx, |s, cx| {
                     // s.last_refresh = Some(chrono::Local::now());
                     s.update_snapshots(quotes);
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+
+        let (tx, rx) = async_channel::unbounded::<MarketFundFlow>();
+        let polling_handle2 = bridge.start_polling_market_fund_flow(tx);
+        cx.spawn(async move |this, cx| {
+            while let Ok(data) = rx.recv().await {
+                let _ = this.update(cx, |s, cx| {
+                    // s.last_refresh = Some(chrono::Local::now());
+                    s.market_fund_flow = Some(data);
                     cx.notify();
                 });
             }
@@ -54,10 +69,11 @@ impl OverviewPanel {
         Self {
             _bridge: bridge,
             snapshots,
-            polling_handle,
+            polling_handle: vec![polling_handle1, polling_handle2],
             theme,
             app_state,
             market_snapshot: None,
+            market_fund_flow: None,
         }
     }
     fn handle_app_state_change(&mut self, _state: Entity<StockAppState>, cx: &mut Context<Self>) {
@@ -323,7 +339,13 @@ impl OverviewPanel {
                             .gap_2()
                             .text_2xl()
                             .text_color(theme.text_secondary)
-                            .child(format!("-396.66亿")),
+                            .child(
+                                self.market_fund_flow
+                                    .as_ref()
+                                    .map_or("--".to_string(), |s| {
+                                        format!("{:.2}亿", yuan_to_yi(s.main_net_inflow))
+                                    }),
+                            ),
                     )
                     .child(
                         h_flex()
