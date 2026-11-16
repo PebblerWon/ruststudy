@@ -1,0 +1,8 @@
+[package]
+name = "group_hover_probe"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+gpui-pre = { version = "=0.3.9", features = ["test-support"] }

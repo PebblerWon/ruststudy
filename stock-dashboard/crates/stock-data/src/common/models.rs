@@ -148,3 +148,78 @@ pub struct MarketFundFlow {
     pub sz_close: f64,
     pub sz_change_percent: f64,
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MutualType {
+    Sg,   // 001 沪股通（北向）
+    HkSg, // 002 港股通（沪）（南向）
+    Sz,   // 003 深股通（北向）
+    HkSz, // 004 港股通（深）（南向）
+}
+
+impl MutualType {
+    pub fn from_code(code: &str) -> Option<Self> {
+        match code {
+            "001" => Some(Self::Sg),
+            "002" => Some(Self::HkSg),
+            "003" => Some(Self::Sz),
+            "004" => Some(Self::HkSz),
+            _ => None,
+        }
+    }
+
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Sg => "001",
+            Self::HkSg => "002",
+            Self::Sz => "003",
+            Self::HkSz => "004",
+        }
+    }
+
+    /// 是否北向（外资经沪深港通买 A 股）
+    pub fn is_north(self) -> bool {
+        matches!(self, Self::Sg | Self::Sz)
+    }
+}
+
+/// 通道当日概览（RPT_MUTUAL_QUOTA，盘中实时）
+/// ⚠️ 北向行金额字段（net_buy_amt/remain_amt）为 0.0 占位（2024-08 停披露），
+///    仅涨跌家数与关联指数实时有效；南向行金额照常
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct NorthboundSummary {
+    pub channel: MutualType,
+    pub name: String,       // "沪股通"（响应带前导空格，解析已 trim）
+    pub direction: String,  // "北向" / "南向"
+    pub board: String,      // "沪港通" / "深港通"
+    pub up_count: u32,      // f104 标的池上涨家数（通道池口径，非全市场）
+    pub down_count: u32,    // f105
+    pub flat_count: u32,    // f106
+    pub net_buy_amt: f64,   // 万元；北向恒 0.0 占位，南向有效
+    pub remain_amt: f64,    // 万元；额度剩余，"额度充足"时为 0
+    pub index_code: String, // 000001 / 399001 / HSI
+    pub index_name: String,
+    pub index_change_pct: f64,         // %，实时（INDEX_f3）
+    pub trade_date: chrono::NaiveDate, // QUOTA 盘中即返回当天
+}
+/// 通道历史日线（RPT_MUTUAL_DEAL_HISTORY，T+1 出数）
+/// ⚠️ 2024-08-19 起净买额类字段 null → 解析为 None；禁用 0.0 兜底
+///    （null 是"停披露"的契约语义，与"真实 0"必须可区分）
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct NorthboundDaily {
+    pub channel: MutualType,
+    pub date: chrono::NaiveDate,
+    pub deal_amt: f64,                // 万元，成交总额（新旧口径唯一全存金额）
+    pub deal_num: u64,                // 成交笔数
+    pub net_deal_amt: Option<f64>,    // 万元，净买额（2024-08-19 起 None）
+    pub fund_inflow: Option<f64>,     // 万元，当日资金流入
+    pub buy_amt: Option<f64>,         // 万元，买入成交额
+    pub sell_amt: Option<f64>,        // 万元，卖出成交额
+    pub quota_balance: Option<f64>,   // 万元，当日额度余额
+    pub hold_market_cap: Option<f64>, // ⚠️ 元（唯一"元"单位），持股市值
+    pub lead_stock_code: String,      // 北向 "603366.SH" / 南向 "02335.HK"
+    pub lead_stock_name: String,
+    pub lead_stock_pct: f64,   // %，领涨股涨跌幅
+    pub index_close: f64,      // 关联指数收盘（沪：上证，深：深成，南向：恒指）
+    pub index_change_pct: f64, // %
+}

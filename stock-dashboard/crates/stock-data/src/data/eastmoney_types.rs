@@ -15,6 +15,34 @@ pub fn take_data<'a>(v: &'a Value, api: &str) -> DataErrorResult<&'a Value> {
         .ok_or_else(|| DataError::Api(format!("{api}: data 为空")))
 }
 
+/// datacenter 壳：{version, result:{pages, data:[...], count}, success, message, code}
+/// ⚠️ 与 push2 的 {rc, data} 是两套壳，take_data() 不适用
+pub fn take_result_rows<'a>(v: &'a Value, api: &str) -> DataErrorResult<Vec<&'a Value>> {
+    let a = v.get("success");
+    let success = a.and_then(|s| s.as_bool()).unwrap_or(false);
+    if !success {
+        return Err(DataError::Api(format!(
+            "{api}: success=false, message={}",
+            str_field(v, "message")
+        )));
+    }
+    let arr = v
+        .pointer("/result/data")
+        .and_then(|d| d.as_array())
+        .ok_or_else(|| DataError::Api(format!("{api}: result.data 缺失")))?;
+    Ok(arr.iter().collect())
+}
+
+/// 可缺失数值：null / 缺失 / 非数 → None
+/// （与 f64_field 的"归 0"严格区分：专用于停披露字段，保住 null 语义）
+pub fn f64_field_opt(v: &Value, key: &str) -> Option<f64> {
+    match v.get(key) {
+        Some(Value::Number(n)) => n.as_f64(),
+        Some(Value::String(s)) => s.parse::<f64>().ok(),
+        _ => None,
+    }
+}
+
 /// 提取数值字段：Number 直接取；String 尝试 parse（"-" 等失败归 0）；null 归 0
 pub fn f64_field(v: &Value, key: &str) -> f64 {
     match v.get(key) {

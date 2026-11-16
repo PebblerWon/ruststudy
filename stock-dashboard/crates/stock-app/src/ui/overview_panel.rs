@@ -7,6 +7,7 @@ use crate::{
         theme::{AppThemePalette, theme_palette},
     },
 };
+use async_channel::Sender;
 use gpui_kit::{
     base::{StyledExt, h_flex, v_flex},
     *,
@@ -37,31 +38,49 @@ impl OverviewPanel {
         cx: &mut Context<Self>,
         app_state: Entity<StockAppState>,
     ) -> Self {
-        let (tx, rx) = async_channel::unbounded::<Vec<IndexQuote>>();
-        let polling_handle1 = bridge.start_polling_index_quotes(tx);
-        cx.spawn(async move |this, cx| {
-            while let Ok(quotes) = rx.recv().await {
-                let _ = this.update(cx, |s, cx| {
-                    // s.last_refresh = Some(chrono::Local::now());
-                    s.update_snapshots(quotes);
-                    cx.notify();
-                });
-            }
-        })
-        .detach();
+        // let (tx, rx) = async_channel::unbounded::<Vec<IndexQuote>>();
+        // let polling_handle1 = bridge.start_polling_index_quotes(tx);
+        // cx.spawn(async move |this, cx| {
+        //     while let Ok(quotes) = rx.recv().await {
+        //         let _ = this.update(cx, |s, cx| {
+        //             // s.last_refresh = Some(chrono::Local::now());
+        //             s.update_snapshots(quotes);
+        //             cx.notify();
+        //         });
+        //     }
+        // })
+        // .detach();
 
-        let (tx, rx) = async_channel::unbounded::<MarketFundFlow>();
-        let polling_handle2 = bridge.start_polling_market_fund_flow(tx);
-        cx.spawn(async move |this, cx| {
-            while let Ok(data) = rx.recv().await {
-                let _ = this.update(cx, |s, cx| {
-                    // s.last_refresh = Some(chrono::Local::now());
-                    s.market_fund_flow = Some(data);
-                    cx.notify();
-                });
-            }
-        })
-        .detach();
+        let polling_handle1 = Self::spawn_polling_loop(
+            bridge.clone(),
+            cx,
+            |bridge, tx| bridge.start_polling_index_quotes(tx),
+            |s, data| {
+                s.update_snapshots(data);
+            },
+        );
+
+        // let (tx, rx) = async_channel::unbounded::<MarketFundFlow>();
+        // let polling_handle2 = bridge.start_polling_market_fund_flow(tx);
+        // cx.spawn(async move |this, cx| {
+        //     while let Ok(data) = rx.recv().await {
+        //         let _ = this.update(cx, |s, cx| {
+        //             // s.last_refresh = Some(chrono::Local::now());
+        //             s.market_fund_flow = Some(data);
+        //             cx.notify();
+        //         });
+        //     }
+        // })
+        // .detach();
+
+        let polling_handle2 = Self::spawn_polling_loop(
+            bridge.clone(),
+            cx,
+            |bridge, tx| bridge.start_polling_market_fund_flow(tx),
+            |s, data| {
+                s.market_fund_flow = Some(data);
+            },
+        );
         cx.observe(&app_state, Self::handle_app_state_change)
             .detach();
         let snapshots = Vec::with_capacity(6);
@@ -75,6 +94,32 @@ impl OverviewPanel {
             market_snapshot: None,
             market_fund_flow: None,
         }
+    }
+
+    fn spawn_polling_loop<T, G, F>(
+        bridge: Arc<DataBridge>,
+        cx: &mut Context<Self>,
+        get_fn: G,
+        update: F,
+    ) -> PollingHandle
+    where
+        T: Send + 'static,
+        G: Fn(Arc<DataBridge>, Sender<T>) -> PollingHandle + 'static,
+        F: Fn(&mut OverviewPanel, T) + 'static,
+    {
+        let (tx, rx) = async_channel::unbounded::<T>();
+
+        cx.spawn(async move |this, cx| {
+            while let Ok(data) = rx.recv().await {
+                let _ = this.update(cx, |s, cx| {
+                    update(s, data);
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+        let polling_handle1 = get_fn(bridge, tx);
+        polling_handle1
     }
     fn handle_app_state_change(&mut self, _state: Entity<StockAppState>, cx: &mut Context<Self>) {
         let all_a_codes = &_state.read(cx).all_a_codes;
@@ -120,32 +165,36 @@ impl OverviewPanel {
         h_flex().gap_3().w_full().justify_between().children(
             self.snapshots
                 .iter()
-                .map(|snap| self.render_snapshot_card(snap)),
+                .enumerate()
+                .map(|(ix, snap)| self.render_snapshot_card(ix, snap)),
         )
     }
 
-    fn card(&self) -> Div {
+    fn card(&self, id: impl Into<ElementId>) -> Stateful<Div> {
         let theme = self.theme;
+        // 卡片自身高亮用 .hover() 且必须带唯一 .id()：
+
+        // 2) 无 .id() 的 .hover() 样式判定虽在 paint 期实时读 hit-test，但 hover
+        //    进入/离开不会触发重绘（listener 依赖 element_state 才会 notify），
+        //    高亮显隐只能等轮询等外力重绘，表现为明显卡顿/残留
+        // 加 .id() 后 hover 状态变化瞬间 notify 当前视图，事件驱动即时刷新
+        // （均已用 gpui test-support 对照实验验证，见 scratch/group_hover_probe）
         v_flex()
+            .id(id)
             .w_full()
             .p_3()
             .border(px(1.))
             .border_color(theme.border_primary)
             .rounded_xl()
-        // .hover(|style| {
-        //     style
-        //         .shadow_md()
-        //         .border_color(theme.color_rise)
-        //         .cursor_pointer()
-        // })
+            .hover(|style| style.shadow_md())
     }
-    fn render_snapshot_card(&self, snap: &IndexSnapshot) -> impl IntoElement {
+    fn render_snapshot_card(&self, ix: usize, snap: &IndexSnapshot) -> impl IntoElement {
         let color = match snap.change_pct >= 0.0 {
             true => self.theme.color_rise,
             false => self.theme.color_fall,
         };
         let theme = self.theme;
-        self.card()
+        self.card(("index-card", ix))
             .child(
                 div()
                     .text_sm()
@@ -185,7 +234,7 @@ impl OverviewPanel {
             .w_full()
             .justify_between()
             .children(vec![
-                self.card()
+                self.card(("market-card", 0usize))
                     .h_32()
                     .child(
                         div()
@@ -230,7 +279,7 @@ impl OverviewPanel {
                                 )),
                             ]),
                     ),
-                self.card()
+                self.card(("market-card", 1usize))
                     .h_32()
                     .child(
                         div()
@@ -267,7 +316,7 @@ impl OverviewPanel {
                             .text_color(theme.text_tertiary)
                             .children(vec![div().child("涨停 / 跌停")]),
                     ),
-                self.card()
+                self.card(("market-card", 2usize))
                     .h_32()
                     .child(
                         div()
@@ -296,7 +345,7 @@ impl OverviewPanel {
                             .text_color(theme.text_tertiary)
                             .child(format!("A 股实时成交额快照")),
                     ),
-                self.card()
+                self.card(("market-card", 3usize))
                     .h_32()
                     .child(
                         div()
@@ -304,7 +353,7 @@ impl OverviewPanel {
                             .text_sm()
                             .text_color(theme.text_secondary)
                             .font_bold()
-                            .child(format!("北向资金")),
+                            .child(format!("北向成交占比")),
                     )
                     .child(
                         h_flex()
@@ -324,7 +373,7 @@ impl OverviewPanel {
                                 div().child(format!("沪股通")),
                             ]),
                     ),
-                self.card()
+                self.card(("market-card", 4usize))
                     .h_32()
                     .child(
                         div()
@@ -358,7 +407,7 @@ impl OverviewPanel {
                                 div().child(format!("2026-10-30")),
                             ]),
                     ),
-                self.card()
+                self.card(("market-card", 5usize))
                     .h_32()
                     .child(
                         div()
