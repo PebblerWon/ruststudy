@@ -1,5 +1,7 @@
 use std::sync::Arc;
 use stock_data::{DataError, EastmoneyClient, PollingHandle, spawn_polling};
+
+use crate::ui::overview_panel::NorthDeal;
 pub struct DataBridge {
     rt: tokio::runtime::Runtime,
     pub client: Arc<EastmoneyClient>,
@@ -96,6 +98,48 @@ impl DataBridge {
 
             tx.try_send(data)
                 .map_err(|err| DataError::ProcessError(err.to_string()))
+        })
+    }
+
+    /// 启动轮询：查询市场行情
+    pub fn start_polling_northbound_summary(
+        &self,
+        tx: async_channel::Sender<Vec<stock_data::NorthboundSummary>>,
+    ) -> PollingHandle {
+        let client = self.client.clone();
+        // spawn_polling 内部 tokio::spawn，必须在 runtime 上下文里调用
+
+        self.rt.block_on(async move {
+            spawn_polling(
+                move || {
+                    let client = client.clone();
+                    async move { client.northbound_summary().await }
+                },
+                move |data| {
+                    let _ = tx.try_send(data);
+                },
+            )
+        })
+    }
+
+    pub fn fetch_north_deal(&self, tx: async_channel::Sender<NorthDeal>) -> Result<(), DataError> {
+        let client = self.client.clone();
+        self.rt.block_on(async move {
+            let sg = client
+                .northbound_history(stock_data::MutualType::Sg, 1)
+                .await?;
+            let sz = client
+                .northbound_history(stock_data::MutualType::Sz, 1)
+                .await?;
+            if sg.is_empty() || sz.is_empty() {
+                return Err(DataError::Api("northbound_history 空数据".into()));
+            }
+
+            tx.try_send(NorthDeal {
+                total_wan: sg[0].deal_amt + sz[0].deal_amt,
+                date: sg[0].date,
+            })
+            .map_err(|err| DataError::ProcessError(err.to_string()))
         })
     }
 }

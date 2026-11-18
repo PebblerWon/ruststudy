@@ -1685,7 +1685,54 @@ pub fn north_turnover_pct(north_wan: f64, market_wan: f64) -> f64 {
 }
 ```
 
-组装路径（MVP）：`northbound_history(Sg, 1)` + `northbound_history(Sz, 1)` 取最新两行 `deal_amt` 之和（万元），分母 `market_snapshot().total_amount × 1e4`（万元），喂给 `north_turnover_pct`。
+**三指标取值逻辑明细**（2026-11-16 按实际 UI 数据流定稿：OverviewPanel 状态 + bridge 轮询/一次性请求）：
+
+**① 状态组织**（`stock-app/src/ui/overview_panel.rs`）：
+
+| 状态字段 | 类型 | 数据来源 | 更新方式 |
+| -------- | ---- | -------- | -------- |
+| `northbound_summary` | `Option<Vec<NorthboundSummary>>` | `client.northbound_summary()` | 已接 `start_polling_northbound_summary` 轮询（update 闭包存状态，替换现 println） |
+| `north_deal` | `Option<NorthDeal>`（见下） | `northbound_history(Sg,1)` + `(Sz,1)` | **一次性请求**（启动时 + 收盘后重拉，非轮询，30min TTL 缓存在 client 内） |
+
+```rust
+/// 北上成交聚合（UI 本地派生状态，非 client 模型）
+pub struct NorthDeal {
+    pub total_wan: f64,            // 沪+深 deal_amt 之和（万元）
+    pub date: chrono::NaiveDate,   // 最新行日期（T-1）
+}
+```
+
+**② 三指标链路**：
+
+| 指标 | 取值步骤 | 空窗语义 |
+| ---- | -------- | -------- |
+| 主数字：占比 % | 1. 分子 `north_deal.total_wan`（万元）<br>2. 分母**复用 `self.market_snapshot`**：`total_amount × 1e4`（亿元→万元），**不发新请求**<br>3. `north_turnover_pct(north_wan, market_wan)` | 任一来源 None → 显示 "--"，**不发默认值**（一次性请求 unwrap_or 空值吞错的教训：发空值 = 状态污染 + 永不再试） |
+| 主数字注脚 | `format!("{:.1}亿 · {}", north_deal.total_wan / 1e4, north_deal.date)`；⚠️ `{:.1}` 只能吃 f64，`.to_string()` 后会截断成前 2 字符（"10456.78亿"→"10亿"） | `north_deal` None → 注脚只显示 "--" |
+| 副行：上涨 X / 下跌 Y | `northbound_summary.as_ref()` → `filter(\|s\| s.channel.is_north())` 取 2 条（沪 001 + 深 003）→ `X = Σup_count`、`Y = Σdown_count`（f104/f105 求和）；右侧注脚固定文案 "北向标的池口径" | `northbound_summary` None → "-- / --" |
+
+**③ history 的一次性请求模式**（对照 `bridge.get_all_a_codes` 现有写法，但**去掉 unwrap_or**）：
+
+```rust
+// bridge.rs：一次性拉北上成交（30min TTL 缓存在 client 内，重复调用无成本）
+pub fn fetch_north_deal(&self, tx: async_channel::Sender<NorthDeal>) -> Result<(), DataError> {
+    let client = self.client.clone();
+    self.rt.block_on(async move {
+        let sg = client.northbound_history(MutualType::Sg, 1).await?;  // ? 上抛，不用 unwrap_or
+        let sz = client.northbound_history(MutualType::Sz, 1).await?;
+        if sg.is_empty() || sz.is_empty() {
+            return Err(DataError::Api("northbound_history 空数据".into()));
+        }
+        tx.try_send(NorthDeal {
+            total_wan: sg[0].deal_amt + sz[0].deal_amt,
+            date: sg[0].date,        // 沪深最新行日期一致，取沪
+        })
+        .map_err(|err| DataError::ProcessError(err.to_string()))
+    })
+}
+```
+
+- 失败/空数据：tx 不发送 → UI recv 循环退出 → `north_deal` 保持 None → 卡片 "--"（干净空窗，可观测）；收盘后重拉时机 = Afternoon→Closed 切换（`trading_hours::phase` 变化时重发一次）或 MVP 仅启动拉一次
+- 时间语义：分子 T-1 × 分母今日（MVP 混搭口径）——盘中占比偏低属预期，主数字注脚的日期已如实标明
 
 ⚠️ 禁止显示"北向净流入/净买额"：数据 2024-08-19 已停披露，接口返回 0.0 占位，照显示就是造假。想看外资动向只能看成交总额/成交占比与标的池涨跌家数；南向净买额可以正常显示（数据照常披露）。
 

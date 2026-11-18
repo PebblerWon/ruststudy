@@ -51,6 +51,12 @@ pub fn f64_field(v: &Value, key: &str) -> f64 {
         _ => 0.0,
     }
 }
+/// datacenter 日期 "2026-11-09 00:00:00" → NaiveDate（截前 10 位）
+pub fn dc_date(v: &Value, key: &str) -> Option<chrono::NaiveDate> {
+    str_field(v, key)
+        .get(..10)
+        .and_then(|s| chrono::NaiveDate::parse_from_str(s, "%Y-%m-%d").ok())
+}
 
 /// 是否为 "-"（停牌占位），用于打 is_suspended 标
 pub fn is_dash(v: &Value, key: &str) -> bool {
@@ -210,4 +216,45 @@ pub fn parse_market_fund_flow_kline(row_o: Option<&Value>) -> DataErrorResult<Ma
             "parse_market_fund_flow_kline 数据为空".to_string(),
         ));
     }
+}
+
+pub fn parse_quota_row(row: &Value) -> Option<NorthboundSummary> {
+    let channel = MutualType::from_code(str_field(row, "MUTUAL_TYPE"))?;
+    Some(NorthboundSummary {
+        channel,
+        // 实测多个字符串字段带前导空格，统一 trim
+        name: str_field(row, "MUTUAL_TYPE_NAME").trim().to_string(),
+        direction: str_field(row, "FUNDS_DIRECTION").trim().to_string(),
+        board: str_field(row, "BOARD_TYPE").to_string(),
+        up_count: f64_field(row, "f104") as u32,
+        down_count: f64_field(row, "f105") as u32,
+        flat_count: f64_field(row, "f106") as u32,
+        net_buy_amt: f64_field(row, "netBuyAmt"), // 北向 0.0 占位，语义由调用方判定
+        remain_amt: f64_field(row, "dayAmtRemain"),
+        index_code: str_field(row, "INDEX_CODE").trim().to_string(),
+        index_name: str_field(row, "INDEX_NAME").trim().to_string(),
+        index_change_pct: f64_field(row, "INDEX_f3"),
+        trade_date: dc_date(row, "TRADE_DATE")?,
+    })
+}
+
+pub fn parse_deal_row(row: &Value) -> Option<NorthboundDaily> {
+    let channel = MutualType::from_code(str_field(row, "MUTUAL_TYPE"))?;
+    Some(NorthboundDaily {
+        channel,
+        date: dc_date(row, "TRADE_DATE")?,
+        deal_amt: f64_field(row, "DEAL_AMT"),
+        deal_num: f64_field(row, "DEAL_NUM") as u64,
+        net_deal_amt: f64_field_opt(row, "NET_DEAL_AMT"),
+        fund_inflow: f64_field_opt(row, "FUND_INFLOW"),
+        buy_amt: f64_field_opt(row, "BUY_AMT"),
+        sell_amt: f64_field_opt(row, "SELL_AMT"),
+        quota_balance: f64_field_opt(row, "QUOTA_BALANCE"),
+        hold_market_cap: f64_field_opt(row, "HOLD_MARKET_CAP"), // 元
+        lead_stock_code: str_field(row, "LEAD_STOCKS_CODE").trim().to_string(),
+        lead_stock_name: str_field(row, "LEAD_STOCKS_NAME").trim().to_string(),
+        lead_stock_pct: f64_field(row, "LS_CHANGE_RATE"),
+        index_close: f64_field(row, "INDEX_CLOSE_PRICE"),
+        index_change_pct: f64_field(row, "INDEX_CHANGE_RATE"),
+    })
 }

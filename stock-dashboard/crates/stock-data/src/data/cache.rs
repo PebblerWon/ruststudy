@@ -6,6 +6,8 @@ use tokio::sync::Mutex;
 
 pub mod cache_prefix {
     pub const ALL_A_CODES: &str = "ALL_A_CODES";
+    pub const NORTHBOUND_SUMMARY: &str = "NB_SUMMARY"; // TTL 5s
+    pub const NORTHBOUND_HISTORY: &str = "NB_HIST"; // TTL 30min，key 拼 
 }
 #[derive(Debug)]
 struct Entry {

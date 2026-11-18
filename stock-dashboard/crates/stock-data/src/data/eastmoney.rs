@@ -14,6 +14,8 @@ const REFERER: &str = "https://quote.eastmoney.com/center/gridlist.html";
 
 const A_SHARE_LIST_URL: &str = "https://assets.linkdiary.cn/shares/zh_a_list.json";
 
+const BASE_DC: &str = "https://datacenter-web.eastmoney.com/api/data/v1/get";
+
 const HIS_UT: &str = "b2884a393a59ad64002292a3e90d46a5";
 
 #[derive(Clone)]
@@ -22,6 +24,7 @@ pub struct EastmoneyClient {
     limiter: TokenBucket,   // 令牌桶限速器
     base_q: String,         // push2 域名（实时快照类）
     base_his: String,       // push2his 域名（K 线/分时类）
+    base_dc: String,        // datacenter-web 域名（K 线/分时类）
     cache: Arc<AnyTtlCach>, // 缓存
 }
 
@@ -30,11 +33,12 @@ impl EastmoneyClient {
         Self::with_base_url(
             "https://push2.eastmoney.com/api/qt".into(),
             "https://push2his.eastmoney.com/api/qt".into(),
+            BASE_DC.into(),
         )
     }
 
     /// 测试构造：wiremock 注入 base_url
-    pub fn with_base_url(base_q: String, base_his: String) -> Result<Self> {
+    pub fn with_base_url(base_q: String, base_his: String, base_dc: String) -> Result<Self> {
         let http = reqwest::Client::builder()
             .user_agent(UA)
             .default_headers({
@@ -53,6 +57,7 @@ impl EastmoneyClient {
             limiter,
             base_his,
             base_q,
+            base_dc,
             cache: Arc::new(AnyTtlCach::new()),
         })
     }
@@ -272,5 +277,71 @@ impl EastmoneyClient {
         let defaultrows: Vec<Value> = vec![];
         let klines = data["klines"].as_array().unwrap_or(&defaultrows);
         raw::parse_market_fund_flow_kline(klines.last())
+    }
+
+    /// 通道当日概览（实时）：无 filter 一次拉全 4 条（全表仅 4 行），
+    /// 调用方按 MutualType::is_north() 筛北向
+    pub async fn northbound_summary(&self) -> Result<Vec<NorthboundSummary>> {
+        if let Some(hit) = self
+            .cache
+            .get::<Vec<NorthboundSummary>>(cache_prefix::NORTHBOUND_SUMMARY)
+            .await
+        {
+            return Ok((*hit).clone());
+        }
+
+        const COLUMNS: &str = "TRADE_DATE,MUTUAL_TYPE,BOARD_TYPE,MUTUAL_TYPE_NAME,\
+                               FUNDS_DIRECTION,INDEX_CODE,INDEX_NAME,BOARD_CODE";
+        const QUOTE_COLUMNS: &str = "status~07~BOARD_CODE,dayNetAmtIn~07~BOARD_CODE,\
+                                     dayAmtRemain~07~BOARD_CODE,dayAmtThreshold~07~BOARD_CODE,\
+                                     f104~07~BOARD_CODE,f105~07~BOARD_CODE,f106~07~BOARD_CODE,\
+                                     f3~03~INDEX_CODE~INDEX_f3,netBuyAmt~07~BOARD_CODE";
+        let url = format!(
+            "{}?reportName=RPT_MUTUAL_QUOTA&columns={}&quoteColumns={}&quoteType=0\
+             &sortColumns=MUTUAL_TYPE&sortTypes=1&pageSize=2000&source=WEB&client=WEB",
+            self.base_dc, COLUMNS, QUOTE_COLUMNS
+        );
+        let v = self.get_json(&url).await?;
+        let rows: Vec<NorthboundSummary> = raw::take_result_rows(&v, "northbound_summary")?
+            .iter()
+            .filter_map(|r| raw::parse_quota_row(r))
+            .collect();
+        self.cache
+            .insert(
+                cache_prefix::NORTHBOUND_SUMMARY,
+                rows.clone(),
+                Duration::from_secs(5),
+            )
+            .await;
+        Ok(rows)
+    }
+
+    pub async fn northbound_history(
+        &self,
+        channel: MutualType,
+        days: usize,
+    ) -> Result<Vec<NorthboundDaily>> {
+        let key = format!("{}:{}", cache_prefix::NORTHBOUND_HISTORY, channel.code());
+        if let Some(hit) = self.cache.get::<Vec<NorthboundDaily>>(&key).await {
+            return Ok((*hit).clone());
+        }
+        let url = format!(
+            "{}?reportName=RPT_MUTUAL_DEAL_HISTORY&columns=ALL&source=WEB&client=WEB\
+             &filter=%28MUTUAL_TYPE%3D%22{}%22%29&pageSize={}&pageNumber=1\
+             &sortColumns=TRADE_DATE&sortTypes=-1",
+            self.base_dc,
+            channel.code(),
+            days.clamp(1, 2000),
+        );
+
+        let v = self.get_json(&url).await?;
+        let rows: Vec<NorthboundDaily> = raw::take_result_rows(&v, "northbound-history")?
+            .iter()
+            .filter_map(|r| raw::parse_deal_row(r))
+            .collect();
+        self.cache
+            .insert(&key, rows.clone(), Duration::from_secs(30 * 60))
+            .await;
+        Ok(rows)
     }
 }

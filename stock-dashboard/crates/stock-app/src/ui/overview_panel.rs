@@ -12,8 +12,8 @@ use gpui_kit::{
     base::{StyledExt, h_flex, v_flex},
     *,
 };
-use stock_data::data::normalize::yuan_to_yi;
 use stock_data::{IndexQuote, MarketFundFlow, MarketSnapshot, PollingHandle};
+use stock_data::{NorthboundSummary, data::normalize::yuan_to_yi};
 pub struct IndexSnapshot {
     pub code: String,         // 指数代码 000001.SH
     pub name: String,         // 指数名称：上证指数
@@ -22,6 +22,13 @@ pub struct IndexSnapshot {
     pub change_pct: f64,      // 涨跌幅（小数，如0.025 = +2.5%）
     pub turnover_amount: f64, // 成交额
 }
+
+/// 北上成交聚合（UI 本地派生状态，非 client 模型）
+pub struct NorthDeal {
+    pub total_wan: f64,          // 沪+深 deal_amt 之和（万元）
+    pub date: chrono::NaiveDate, // 最新行日期（T-1）
+}
+
 pub struct OverviewPanel {
     /// 持有 bridge：保住 tokio runtime 生命周期（同 StockApp._bridge）
     _bridge: Arc<DataBridge>,
@@ -31,6 +38,8 @@ pub struct OverviewPanel {
     app_state: Entity<StockAppState>,
     market_snapshot: Option<MarketSnapshot>,
     market_fund_flow: Option<MarketFundFlow>,
+    north_deal: Option<NorthDeal>,
+    north_summary: Option<NorthboundSummary>,
 }
 impl OverviewPanel {
     pub fn new(
@@ -81,18 +90,43 @@ impl OverviewPanel {
                 s.market_fund_flow = Some(data);
             },
         );
+
+        let polling_handle3 = Self::spawn_polling_loop(
+            bridge.clone(),
+            cx,
+            |bridge, tx| bridge.start_polling_northbound_summary(tx),
+            |s, data| {
+                // s.market_fund_flow = Some(data);
+                s.north_summary = data.first().cloned();
+                println!("{:?}", data);
+            },
+        );
         cx.observe(&app_state, Self::handle_app_state_change)
             .detach();
+
+        let north_deal_bridge = bridge.clone();
+        cx.spawn(async move |this, cx| {
+            let (tx, rx) = async_channel::unbounded::<NorthDeal>();
+            let _ = north_deal_bridge.fetch_north_deal(tx);
+            while let Ok(data) = rx.recv().await {
+                let _ = this.update(cx, |s, cx| {
+                    s.north_deal = Some(data);
+                });
+            }
+        })
+        .detach();
         let snapshots = Vec::with_capacity(6);
         let theme = theme_palette(cx);
         Self {
             _bridge: bridge,
             snapshots,
-            polling_handle: vec![polling_handle1, polling_handle2],
+            polling_handle: vec![polling_handle1, polling_handle2, polling_handle3],
             theme,
             app_state,
             market_snapshot: None,
             market_fund_flow: None,
+            north_deal: None,
+            north_summary: None,
         }
     }
 
@@ -221,6 +255,12 @@ impl OverviewPanel {
             )
     }
 
+    fn pct(a: f64, b: f64) -> String {
+        if b == 0.0 {
+            return "--".to_string();
+        }
+        format!("{:.2}", a / b)
+    }
     fn render_market_content(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let theme = self.theme;
         let color = theme.color_rise;
@@ -353,14 +393,22 @@ impl OverviewPanel {
                             .text_sm()
                             .text_color(theme.text_secondary)
                             .font_bold()
-                            .child(format!("北向成交占比")),
+                            .child(format!("北向成交占比%")),
                     )
                     .child(
                         h_flex()
                             .gap_2()
                             .text_2xl()
                             .text_color(theme.text_secondary)
-                            .child(format!("0.54亿")),
+                            .child(format!(
+                                "{}%",
+                                Self::pct(
+                                    self.north_deal.as_ref().map_or(0.0, |d| d.total_wan),
+                                    self.market_snapshot
+                                        .as_ref()
+                                        .map_or(0.0, |s| s.total_amount),
+                                )
+                            )),
                     )
                     .child(
                         h_flex()
@@ -369,7 +417,15 @@ impl OverviewPanel {
                             .text_xs()
                             .text_color(theme.text_tertiary)
                             .children(vec![
-                                div().child(format!("上涨 971 / 下跌 639")),
+                                div().child(format!(
+                                    "上涨 {} / 下跌 {}",
+                                    self.north_summary
+                                        .as_ref()
+                                        .map_or("--".to_string(), |d| d.up_count.to_string()),
+                                    self.north_summary
+                                        .as_ref()
+                                        .map_or("--".to_string(), |d| d.down_count.to_string())
+                                )),
                                 div().child(format!("沪股通")),
                             ]),
                     ),
