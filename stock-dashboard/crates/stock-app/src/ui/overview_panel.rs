@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::{
-    bridge::DataBridge,
+    bridge::{self, DataBridge},
     ui::{
         app::StockAppState,
         theme::{AppThemePalette, theme_palette},
@@ -12,7 +12,7 @@ use gpui_kit::{
     base::{StyledExt, h_flex, v_flex},
     *,
 };
-use stock_data::{IndexQuote, MarketFundFlow, MarketSnapshot, PollingHandle};
+use stock_data::{IndexQuote, MarketFundFlow, MarketSnapshot, PollingHandle, StockBoard};
 use stock_data::{NorthboundSummary, data::normalize::yuan_to_yi};
 pub struct IndexSnapshot {
     pub code: String,         // 指数代码 000001.SH
@@ -40,6 +40,8 @@ pub struct OverviewPanel {
     market_fund_flow: Option<MarketFundFlow>,
     north_deal: Option<NorthDeal>,
     north_summary: Option<NorthboundSummary>,
+    industry_board: Vec<StockBoard>,
+    concept_board: Vec<StockBoard>,
 }
 impl OverviewPanel {
     pub fn new(
@@ -98,7 +100,14 @@ impl OverviewPanel {
             |s, data| {
                 // s.market_fund_flow = Some(data);
                 s.north_summary = data.first().cloned();
-                println!("{:?}", data);
+            },
+        );
+        let polling_handle4 = Self::spawn_polling_loop(
+            bridge.clone(),
+            cx,
+            |bridge, tx| bridge.start_polling_industry_board(tx),
+            |s, data| {
+                s.industry_board = data;
             },
         );
         cx.observe(&app_state, Self::handle_app_state_change)
@@ -120,13 +129,20 @@ impl OverviewPanel {
         Self {
             _bridge: bridge,
             snapshots,
-            polling_handle: vec![polling_handle1, polling_handle2, polling_handle3],
+            polling_handle: vec![
+                polling_handle1,
+                polling_handle2,
+                polling_handle3,
+                polling_handle4,
+            ],
             theme,
             app_state,
             market_snapshot: None,
             market_fund_flow: None,
             north_deal: None,
             north_summary: None,
+            industry_board: vec![],
+            concept_board: vec![],
         }
     }
 
@@ -265,7 +281,7 @@ impl OverviewPanel {
         let theme = self.theme;
         let color = theme.color_rise;
         let market_snapshot = &self.market_snapshot;
-
+        let strongest_board = self.industry_board.first();
         div()
             .grid()
             .grid_cols(3)
@@ -397,18 +413,31 @@ impl OverviewPanel {
                     )
                     .child(
                         h_flex()
+                            .items_end()
                             .gap_2()
                             .text_2xl()
                             .text_color(theme.text_secondary)
-                            .child(format!(
-                                "{}%",
-                                Self::pct(
-                                    self.north_deal.as_ref().map_or(0.0, |d| d.total_wan),
-                                    self.market_snapshot
-                                        .as_ref()
-                                        .map_or(0.0, |s| s.total_amount),
-                                )
-                            )),
+                            .children(vec![
+                                div().child(format!(
+                                    "{}%",
+                                    Self::pct(
+                                        self.north_deal.as_ref().map_or(0.0, |d| d.total_wan),
+                                        self.market_snapshot
+                                            .as_ref()
+                                            .map_or(0.0, |s| s.total_amount),
+                                    )
+                                )),
+                                div()
+                                    .text_xs()
+                                    .text_color(theme.text_tertiary)
+                                    .child(format!(
+                                        "{}",
+                                        self.north_deal.as_ref().map_or("--".to_string(), |s| s
+                                            .date
+                                            .format("%Y-%m-%d")
+                                            .to_string()),
+                                    )),
+                            ]),
                     )
                     .child(
                         h_flex()
@@ -459,8 +488,18 @@ impl OverviewPanel {
                             .text_xs()
                             .text_color(theme.text_tertiary)
                             .children(vec![
-                                div().child(format!("占比 -2.37%")),
-                                div().child(format!("2026-10-30")),
+                                div().child(
+                                    self.market_fund_flow
+                                        .as_ref()
+                                        .map_or("--".to_string(), |s| {
+                                            format!("占比 {:.2}%", s.main_net_inflow_percent)
+                                        }),
+                                ),
+                                div().child(
+                                    self.market_fund_flow
+                                        .as_ref()
+                                        .map_or("--".to_string(), |s| format!("{}", s.date)),
+                                ),
                             ]),
                     ),
                 self.card(("market-card", 5usize))
@@ -478,7 +517,9 @@ impl OverviewPanel {
                             .gap_2()
                             .text_2xl()
                             .text_color(theme.text_secondary)
-                            .child(format!("视频媒体")),
+                            .child(
+                                strongest_board.map_or("--".to_string(), |s| s.name.to_string()),
+                            ),
                     )
                     .child(
                         h_flex()
@@ -487,7 +528,16 @@ impl OverviewPanel {
                             .text_xs()
                             .text_color(theme.text_tertiary)
                             .children(vec![
-                                div().text_color(theme.color_rise).child(format!("-2.37%")),
+                                div()
+                                    .text_color(strongest_board.map_or(theme.text_tertiary, |s| {
+                                        match s.change_percent > 0.0 {
+                                            true => theme.color_rise,
+                                            false => theme.color_fall,
+                                        }
+                                    }))
+                                    .child(strongest_board.map_or("--".to_string(), |s| {
+                                        format!("{:+.2}%", s.change_percent)
+                                    })),
                                 div().child(format!("行业强度")),
                             ]),
                     ),

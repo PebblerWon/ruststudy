@@ -223,3 +223,17 @@ pub struct NorthboundDaily {
     pub index_close: f64,      // 关联指数收盘（沪：上证，深：深成，南向：恒指）
     pub index_change_pct: f64, // %
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct StockBoard {
+    pub name: String,
+    pub code: String,
+    pub price: f64,
+    pub change_percent: f64,
+    pub change: f64,
+    pub total_market_cap: f64,
+    pub rise_count: u32,
+    pub fall_count: u32,
+    pub leading_stock: String,
+    pub leading_stock_change_percent: f64,
+}

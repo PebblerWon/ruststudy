@@ -344,4 +344,42 @@ impl EastmoneyClient {
             .await;
         Ok(rows)
     }
+
+    pub async fn get_stock_industry_board(&self) -> Result<Vec<StockBoard>> {
+        let url = format!(
+            "{}/clist/get?po=1&np=1&ut={}&fltt=2&invt=2&fid=f3&fs=m:90+t:2+f:!50&fields=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,f20,f21,f23,f24,f25,f26,f22,f33,f11,f62,f128,f136,f115,f152,f124,f107,f104,f105,f140,f141,f207,f208,f209,f222&pn=1&pz=100",
+            self.base_q, HIS_UT
+        );
+        let v = self.get_json(&url).await?;
+        let data = raw::take_data(&v, "clist/get")?;
+        let mut out = Vec::with_capacity(500);
+
+        out.extend(
+            data["diff"]
+                .as_array()
+                .unwrap_or(&vec![])
+                .iter()
+                .map(raw::parse_stock_board_row),
+        );
+        Ok(out)
+    }
+
+    pub async fn get_stock_concept_board(&self) -> Result<Vec<StockBoard>> {
+        let url = format!(
+            "{}/clist/get?po=1&np=1&ut={}&fltt=2&invt=2&fid=f3&fs=m:90+t:3+f:!50&fields=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f12,f13,f14,f15,f16,f17,f18,f20,f21,f23,f24,f25,f26,f22,f33,f11,f62,f128,f136,f115,f152,f124,f107,f104,f105,f140,f141,f207,f208,f209,f222&pn=1&pz=100",
+            self.base_q, HIS_UT
+        );
+        let v = self.get_json(&url).await?;
+        let data = raw::take_data(&v, "clist/get")?;
+        let mut out = Vec::with_capacity(500);
+
+        out.extend(
+            data["diff"]
+                .as_array()
+                .unwrap_or(&vec![])
+                .iter()
+                .map(raw::parse_stock_board_row),
+        );
+        Ok(out)
+    }
 }

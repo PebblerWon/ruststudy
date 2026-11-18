@@ -258,3 +258,18 @@ pub fn parse_deal_row(row: &Value) -> Option<NorthboundDaily> {
         index_change_pct: f64_field(row, "INDEX_CHANGE_RATE"),
     })
 }
+
+pub fn parse_stock_board_row(row: &Value) -> StockBoard {
+    StockBoard {
+        name: str_field(row, "f14").trim().to_string(),
+        code: str_field(row, "f12").trim().to_string(),
+        price: f64_field(row, "f2"),
+        change_percent: f64_field(row, "f3"),
+        change: f64_field(row, "f4"),
+        total_market_cap: f64_field(row, "f20"),
+        rise_count: f64_field(row, "f104") as u32,
+        fall_count: f64_field(row, "f105") as u32,
+        leading_stock: str_field(row, "f128").trim().to_string(),
+        leading_stock_change_percent: f64_field(row, "f136"),
+    }
+}

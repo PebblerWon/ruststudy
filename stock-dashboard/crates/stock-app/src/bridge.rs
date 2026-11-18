@@ -122,6 +122,48 @@ impl DataBridge {
         })
     }
 
+    /// 启动轮询：查询市场行业板块
+    pub fn start_polling_industry_board(
+        &self,
+        tx: async_channel::Sender<Vec<stock_data::StockBoard>>,
+    ) -> PollingHandle {
+        let client = self.client.clone();
+        // spawn_polling 内部 tokio::spawn，必须在 runtime 上下文里调用
+
+        self.rt.block_on(async move {
+            spawn_polling(
+                move || {
+                    let client = client.clone();
+                    async move { client.get_stock_industry_board().await }
+                },
+                move |data| {
+                    let _ = tx.try_send(data);
+                },
+            )
+        })
+    }
+
+    /// 启动轮询：查询市场概念板块
+    pub fn start_polling_concept_board(
+        &self,
+        tx: async_channel::Sender<Vec<stock_data::StockBoard>>,
+    ) -> PollingHandle {
+        let client = self.client.clone();
+        // spawn_polling 内部 tokio::spawn，必须在 runtime 上下文里调用
+
+        self.rt.block_on(async move {
+            spawn_polling(
+                move || {
+                    let client = client.clone();
+                    async move { client.get_stock_concept_board().await }
+                },
+                move |data| {
+                    let _ = tx.try_send(data);
+                },
+            )
+        })
+    }
+
     pub fn fetch_north_deal(&self, tx: async_channel::Sender<NorthDeal>) -> Result<(), DataError> {
         let client = self.client.clone();
         self.rt.block_on(async move {
