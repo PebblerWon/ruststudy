@@ -54,7 +54,7 @@ impl StockApp {
     pub fn new(_window: &mut Window, cx: &mut Context<Self>, bridge: Arc<DataBridge>) -> Self {
         let app_state = cx.new(|cx| StockAppState::new());
         let overview_panel = cx.new(|cx| OverviewPanel::new(bridge.clone(), cx, app_state.clone()));
-        let ranklist_panel = cx.new(|cx| RanklistPanel::new());
+        let ranklist_panel = cx.new(|cx| RanklistPanel::new(bridge.clone(), cx));
         let menus = vec![
             StockAppMenuItem {
                 label: "总览".into(),
@@ -70,7 +70,7 @@ impl StockApp {
         Self::init_data(cx, bridge.clone());
         Self {
             collapsed: false,
-            active_key: menus[0].key.clone(),
+            active_key: menus[1].key.clone(),
             menus,
             _bridge: bridge.clone(),
             app_state,

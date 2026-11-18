@@ -1,120 +1,181 @@
+use std::sync::Arc;
+
+use crate::bridge::{self, DataBridge};
+use crate::ui::theme::{AppThemePalette, theme_palette};
+use gpui_kit::component::ActiveTheme as _;
+
 use chrono::Utc;
+use gpui_kit::component::table::{Column, ColumnSort, DataTable, TableDelegate, TableState};
 use gpui_kit::{
     base::{h_flex, v_flex},
     *,
 };
 
-pub struct IndexSnapshot {
-    pub code: String,         // 指数代码 000001.SH
-    pub name: String,         // 指数名称：上证指数
-    pub last_price: f64,      // 最新点位
-    pub change: f64,          // 涨跌额（涨了多少点）
-    pub change_pct: f64,      // 涨跌幅（小数，如0.025 = +2.5%）
-    pub turnover_amount: f64, // 成交额
-    pub timestamp: i64,       // 行情时间戳
+use stock_data::{PollingHandle, StockBoard};
+
+struct MyTableDelegate {
+    data: Vec<StockBoard>,
+    columns: Vec<Column>,
 }
-impl IndexSnapshot {
-    pub fn new(
-        code: &str,
-        name: &str,
-        last_price: f64,
-        change: f64,
-        change_pct: f64,
-        turnover_amount: f64,
-    ) -> Self {
+
+impl MyTableDelegate {
+    fn new(data: Vec<StockBoard>) -> Self {
         Self {
-            code: code.into(),
-            name: name.into(),
-            last_price,
-            change,
-            change_pct,
-            turnover_amount,
-            timestamp: 0,
+            data,
+            columns: vec![
+                Column::new("index", "排名").width(50.0),
+                Column::new("name", "名称"),
+                Column::new("change_percent", "涨跌幅").width(80.0),
+                Column::new("leading_stock", "领涨股").width(80.0),
+                Column::new("rise_fall", "涨/跌").width(80.0),
+                Column::new("hands", "换手").width(50.0),
+            ],
+        }
+    }
+}
+impl TableDelegate for MyTableDelegate {
+    fn columns_count(&self, cx: &App) -> usize {
+        self.columns.len()
+    }
+    fn rows_count(&self, cx: &App) -> usize {
+        self.data.len()
+    }
+    fn column(&self, col_ix: usize, cx: &App) -> Column {
+        self.columns[col_ix].clone()
+    }
+    fn render_td(
+        &mut self,
+        row_ix: usize,
+        col_ix: usize,
+        window: &mut Window,
+        cx: &mut Context<component::table::TableState<Self>>,
+    ) -> impl IntoElement {
+        let row = &self.data[row_ix];
+        let col = &self.columns[col_ix];
+        let theme = AppThemePalette::for_appearance(cx.theme().is_dark());
+        match col.key.as_ref() {
+            "index" => format!("{}", row_ix + 1).into_any_element(),
+            "name" => row.name.clone().into_any_element(),
+            "change_percent" => div()
+                .text_color(
+                    Some(row.change_percent)
+                        .map(|n| {
+                            if n > 0.0 {
+                                return theme.color_rise;
+                            } else if n < 0.0 {
+                                return theme.color_fall;
+                            } else {
+                                return theme.text_tertiary;
+                            }
+                        })
+                        .unwrap(),
+                )
+                .child(format!("{:+.2}", row.change_percent))
+                .into_any_element(),
+            "leading_stock" => v_flex()
+                .items_center()
+                .children(vec![
+                    row.leading_stock.clone().into_any_element(),
+                    div()
+                        .text_color(
+                            Some(row.leading_stock_change_percent)
+                                .map(|n| {
+                                    if n > 0.0 {
+                                        return theme.color_rise;
+                                    } else if n < 0.0 {
+                                        return theme.color_fall;
+                                    } else {
+                                        return theme.text_tertiary;
+                                    }
+                                })
+                                .unwrap(),
+                        )
+                        .child(format!("{:+.2}", row.leading_stock_change_percent))
+                        .into_any_element(),
+                ])
+                .into_any_element(),
+            "rise_fall" => row.rise_count.to_string().into_any_element(),
+            "hands" => row.rise_count.to_string().into_any_element(),
+            _ => "".to_string().into_any_element(),
         }
     }
 }
 pub struct RanklistPanel {
-    snapshots: Vec<IndexSnapshot>,
+    _bridge: Arc<DataBridge>,
+    // 接口轮询句柄
+    polling_handle: Vec<PollingHandle>,
+    industry_board: Vec<StockBoard>,
+    concept_board: Vec<StockBoard>,
 }
 impl RanklistPanel {
-    pub fn new() -> Self {
-        let now = Utc::now().timestamp_millis();
-        let snapshots = vec![
-            IndexSnapshot {
-                code: "000001.SH".to_string(),
-                name: "上证指数".to_string(),
-                last_price: 3328.74,
-                change: 18.32,
-                change_pct: 0.0055,
-                turnover_amount: 2689.42,
-                timestamp: now,
-            },
-            IndexSnapshot {
-                code: "399001.SZ".to_string(),
-                name: "深证成指".to_string(),
-                last_price: 10756.21,
-                change: 76.54,
-                change_pct: 0.0072,
-                turnover_amount: 3142.77,
-                timestamp: now,
-            },
-            IndexSnapshot {
-                code: "399006.SZ".to_string(),
-                name: "创业板指".to_string(),
-                last_price: 2142.68,
-                change: -9.73,
-                change_pct: -0.0045,
-                turnover_amount: 1256.31,
-                timestamp: now,
-            },
-            IndexSnapshot {
-                code: "000688.SH".to_string(),
-                name: "科创50".to_string(),
-                last_price: 967.35,
-                change: 14.12,
-                change_pct: 0.0148,
-                turnover_amount: 487.95,
-                timestamp: now,
-            },
-            IndexSnapshot {
-                code: "000906.SH".to_string(),
-                name: "中证400".to_string(),
-                last_price: 4832.17,
-                change: 21.95,
-                change_pct: 0.0046,
-                turnover_amount: 945.62,
-                timestamp: now,
-            },
-            IndexSnapshot {
-                code: "000016.SH".to_string(),
-                name: "上证50".to_string(),
-                last_price: 2741.89,
-                change: 12.06,
-                change_pct: 0.0044,
-                turnover_amount: 876.28,
-                timestamp: now,
-            },
-        ];
-        Self { snapshots }
+    pub fn new(bridge: Arc<DataBridge>, cx: &mut Context<Self>) -> Self {
+        let (tx, rx) = async_channel::unbounded::<Vec<StockBoard>>();
+        let handel1 = bridge.start_polling_industry_board(tx);
+
+        cx.spawn(async move |this, cx| {
+            while let Ok(data) = rx.recv().await {
+                println!("{:?}", data);
+                let _ = this.update(cx, |s, cx| {
+                    s.industry_board = data;
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+
+        let (tx2, rx2) = async_channel::unbounded::<Vec<StockBoard>>();
+        let handel2 = bridge.start_polling_concept_board(tx2);
+
+        cx.spawn(async move |this, cx| {
+            while let Ok(data) = rx2.recv().await {
+                println!("{:?}", data);
+                let _ = this.update(cx, |s, cx| {
+                    s.concept_board = data;
+                    cx.notify();
+                });
+            }
+        })
+        .detach();
+        Self {
+            _bridge: bridge.clone(),
+            industry_board: vec![],
+            concept_board: vec![],
+            polling_handle: vec![handel1, handel2],
+        }
     }
-    fn render_indicator_cards(
-        &self,
-        _window: &mut Window,
+    fn render_industry_table(
+        &mut self,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        h_flex().w_full().justify_between().children(
-            self.snapshots
-                .iter()
-                .map(|snap| self.render_snapshot_card(snap)),
-        )
+        let data = self.industry_board.clone();
+        println!("{:?}", data);
+        let delegate = MyTableDelegate::new(data);
+        let state = cx.new(|cx| TableState::new(delegate, window, cx));
+        state
     }
-
-    fn render_snapshot_card(&self, snap: &IndexSnapshot) -> impl IntoElement {
-        v_flex().p_2().rounded_xl().child(snap.name.clone())
+    fn render_concept_table(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let data = self.concept_board.clone();
+        let delegate = MyTableDelegate::new(data);
+        let state = cx.new(|cx| TableState::new(delegate, window, cx));
+        state
     }
 }
 impl Render for RanklistPanel {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        div().h_full().child("榜单")
+        div().h_full().grid().grid_cols(2).gap_3().children(vec![
+            div()
+                .h_full()
+                .border_1()
+                .child(self.render_industry_table(window, cx)),
+            div()
+                .h_full()
+                .border_1()
+                .child(self.render_concept_table(window, cx)),
+        ])
     }
 }
