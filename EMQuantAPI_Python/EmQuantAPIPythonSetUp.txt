@@ -1,0 +1,1 @@
+[Em_Info][2026-11-19 17:31:36]:install success! python:C:\Users\xyzq\AppData\Local\Programs\Python\Python311\python.exe path:C:\Users\xyzq\Downloads\EMQuantAPI_Python\EMQuantAPI_Python\python3

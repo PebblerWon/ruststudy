@@ -1,0 +1,26 @@
+[Em_Info][2026-11-19 17:31:55]:machine info. m_strDeviceId=1FBC52E88F9B948325EE33D6C197F078 m_strDeviceModel=MACMD5
+[Em_Info][2026-11-19 17:31:57]:switch main page. page:home
+[Em_Info][2026-11-19 17:31:57]:LoginActivator initialized.
+[Em_Info][2026-11-19 17:32:00]:start loading server list.
+[Em_Info][2026-11-19 17:32:00]:load server list from ServerList.json.e.
+[Em_Info][2026-11-19 17:32:00]:server list loaded. count:2 preferredHost:61.129.129.155 preferredPort:1818
+[Em_Info][2026-11-19 17:32:00]:server list load succeeded.
+[Em_Info][2026-11-19 17:32:00]:switch main page. page:activate
+[Em_Info][2026-11-19 17:32:04]:switch activation tab. page:sms
+[Em_Info][2026-11-19 17:32:11]:request sms code.
+[Em_Info][2026-11-19 17:32:11]:connect login server success. host:61.129.129.155 port:1818
+[Em_Error][2026-11-19 17:32:12]:error info: {"Msg":"需要图片验证码验证","Code":"34","Data":{"MobileActiveCodeContext":null,"ApiContext":null},"Extend":null}
+[Em_Info][2026-11-19 17:32:12]:sms captcha required.
+[Em_Info][2026-11-19 17:32:12]:sms code request failed. code:34 message:请输入图片验证码！
+[Em_Info][2026-11-19 17:32:12]:refresh sms captcha after 3 seconds. code:34
+[Em_Info][2026-11-19 17:32:15]:request sms captcha.
+[Em_Info][2026-11-19 17:32:15]:connect login server success. host:61.129.129.155 port:1818
+[Em_Info][2026-11-19 17:32:15]:sms captcha request succeeded.
+[Em_Info][2026-11-19 17:32:25]:request sms code.
+[Em_Info][2026-11-19 17:32:25]:connect login server success. host:61.129.129.155 port:1818
+[Em_Info][2026-11-19 17:32:25]:sms code request succeeded.
+[Em_Info][2026-11-19 17:32:36]:start phone activation.
+[Em_Info][2026-11-19 17:32:36]:connect login server success. host:61.129.129.155 port:1818
+[Em_Info][2026-11-19 17:32:36]:phone activation succeeded.
+[Em_Info][2026-11-19 17:32:36]:switch main page. page:success
+[Em_Info][2026-11-19 17:32:41]:LoginActivator close requested.

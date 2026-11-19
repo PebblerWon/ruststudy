@@ -97,11 +97,15 @@
 > 目标：对标 stock-dashboard 的进阶页面（按需挑选，非必做）
 > 补强：gpui 自绘、指标库迁移、批量计算流水线
 
-- [ ] **T4.1 分时图** — trends2 当日分时 + 均价线（LineChart）+ 昨收基准
+- [ ] **T4.1 分时图** — trends2 当日分时 + 均价线（LineChart）+ 昨收基准（随 T4.6 指数详情页一并落地，见 [tech/04_index_detail.md](tech/04_index_detail.md)）
+  - **技术方案：** 见 [tech/04_index_detail.md § 4.4](tech/04_index_detail.md)
 - [ ] **T4.2 指标库迁移** — 从 quant 拷贝 SMA/EMA/RSI/MACD/布林带（quant-data/src/indicators），叠加到 K 线图
 - [ ] **T4.3 热力图** — squarify treemap 布局纯函数 + gpui 自绘矩形网格，按涨跌幅/换手率着色
 - [ ] **T4.4 榜单** — clist 按 fid 排序翻页（涨幅/跌幅/成交额 Tab 切换）
 - [ ] **T4.5 搜索与选股扫描** — suggest 搜索加入自选；全市场快照 + 指标信号过滤
+- [ ] **T4.6 指数详情页** — 总览指数卡片点击进入详情页：行情头 + 当日分时图（价格线 + 均价线 + 昨收虚线，双 LineChart 叠层），导航走 app_state 单一事实源 + observe，轮询随页显式销毁，放入 **stock-data + stock-app**
+  - **产出：** index_secid/index_detail/index_timeline（stock-data）+ ui/index_detail_panel.rs + ui/polling_util.rs（stock-app）| **学习点：** 页面导航状态机、LineChart 槽位模式、轮询生命周期管理
+  - **技术方案：** 见 [tech/04_index_detail.md](tech/04_index_detail.md)
 
 **阶段验收：** 热力图渲染全市场涨跌分布，点击格子进入个股详情
 
@@ -129,5 +133,6 @@
 | T4.3 | ⬜ | gpui 自绘、treemap | 热力图（可选） |
 | T4.4 | ⬜ | 表格、Tab 切换 | 榜单（可选） |
 | T4.5 | ⬜ | suggest 接口、批量指标 | 搜索与扫描（可选） |
+| T4.6 | ⬜ | 页面导航状态机、LineChart 槽位、轮询生命周期 | 指数详情页（tech/04，含 T4.1 分时图） |
 
 **状态说明：** ⬜ 待开始 | 🔵 进行中 | ✅ 已完成 | ⏸ 暂停 | ❌ 已取消
