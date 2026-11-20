@@ -939,6 +939,7 @@ async fn smoke_quote_detail_and_timeline() {
 10. **详情页关闭后回到当前菜单面板**（现状默认 ranklist），渲染分流不要写死"返回=总览"。
 11. **DetailTarget 用访问器不用解构**：面板/桥接层若写 `let DetailTarget::Index { .. } = ...` 解构，加 Stock 变体后 match 不穷尽直接编译失败，且把面板绑死在指数变体上——统一走 `target.secid()/code()/name()`（§4.1.2）。
 12. **榜单入口的领涨股没有 code**：`StockBoard` 现只存领涨股名字符串（leading_stock），要做"点击领涨股进详情页"必须先在 clist 解析层补 code/market 字段（§4.10.1），名字字符串拼不出 secid。
+13. **菜单面板轮询全程活跃是既定行为，不是漏了清理**：OverviewPanel / RanklistPanel 的 Entity 在 `StockApp::new` 一次创建后常驻（`menus` 数组持有），切菜单 / 打开详情页只换渲染分支，面板轮询照跑——隐藏面板数据持续更新，切回无首帧等待。全应用峰值 8 个轮询（总览 4 + 榜单 2 + 详情页 2），盘中 5s 一轮 ≈ 1.6 req/s，贴着 500ms 全局限速桶（2 req/s）的 80%，仍在容量内。MVP 不做菜单切换的 stop/resume（对称复杂度翻倍，收益只是省后台请求）；若将来面板数量增长使限速桶吃紧，再统一实现 visibility-driven polling（StockApp 按 active_key/active_detail 显式停启隐藏面板），不要让每个面板自己管理启停状态。
 
 ---
 

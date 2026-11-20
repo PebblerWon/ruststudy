@@ -15,12 +15,13 @@ use gpui_kit::{
 use stock_data::{IndexQuote, MarketFundFlow, MarketSnapshot, PollingHandle, StockBoard};
 use stock_data::{NorthboundSummary, data::normalize::yuan_to_yi};
 pub struct IndexSnapshot {
-    pub code: String,         // 指数代码 000001.SH
-    pub name: String,         // 指数名称：上证指数
-    pub last_price: f64,      // 最新点位
-    pub change: f64,          // 涨跌额（涨了多少点）
-    pub change_pct: f64,      // 涨跌幅（小数，如0.025 = +2.5%）
-    pub turnover_amount: f64, // 成交额
+    pub code: String,          // 指数代码 000001.SH
+    pub secid: Option<String>, // 新增：完整 secid（"1.000001"）；查表失败为 None
+    pub name: String,          // 指数名称：上证指数
+    pub last_price: f64,       // 最新点位
+    pub change: f64,           // 涨跌额（涨了多少点）
+    pub change_pct: f64,       // 涨跌幅（小数，如0.025 = +2.5%）
+    pub turnover_amount: f64,  // 成交额
 }
 
 /// 北上成交聚合（UI 本地派生状态，非 client 模型）
@@ -198,6 +199,7 @@ impl OverviewPanel {
             .into_iter()
             .map(|quote| IndexSnapshot {
                 code: quote.code,
+                secid: None,
                 name: quote.name,
                 last_price: quote.price,
                 change: quote.change,

@@ -13,17 +13,54 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 
 use crate::bridge::{self, DataBridge};
+use crate::ui::detail_panel::DetailPanel;
 use crate::ui::overview_panel::OverviewPanel;
 use crate::ui::ranklist_panel::RanklistPanel;
 use stock_data::{PollingHandle, Quote};
 
+#[derive(Clone, PartialEq)]
+pub enum DetailTarget {
+    Index {
+        secid: String, // 完整 secid："1.000001"——经 index_secid() 查表获得
+        code: String,  // 展示用 "000001"
+        name: String,  // 展示用 "上证指数"
+    },
+    Stock {
+        secid: String, // 完整 secid："0.600519"——经 secid() 规则函数或 f13.f12 拼接
+        code: String,
+        name: String,
+    },
+}
+
+impl DetailTarget {
+    pub fn secid(&self) -> &str {
+        match self {
+            Self::Index { secid, .. } | Self::Stock { secid, .. } => secid,
+        }
+    }
+
+    pub fn code(&self) -> &str {
+        match self {
+            Self::Index { code, .. } | Self::Stock { code, .. } => code,
+        }
+    }
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Index { name, .. } | Self::Stock { name, .. } => name,
+        }
+    }
+}
 pub struct StockAppState {
     pub all_a_codes: Option<Arc<Vec<String>>>,
+    pub active_detail: Option<DetailTarget>,
 }
 
 impl StockAppState {
     pub fn new() -> Self {
-        Self { all_a_codes: None }
+        Self {
+            all_a_codes: None,
+            active_detail: None,
+        }
     }
 }
 
@@ -48,6 +85,7 @@ pub struct StockApp {
     /// 否则 gpui 丢弃启动闭包后 Arc 归零，runtime 被提前 drop
     _bridge: Arc<DataBridge>,
     app_state: Entity<StockAppState>,
+    detail: Option<Entity<DetailPanel>>,
 }
 
 impl StockApp {
@@ -67,6 +105,9 @@ impl StockApp {
                 panel: AppPanel::Ranklist(ranklist_panel),
             },
         ];
+
+        cx.observe(&app_state, Self::handle_detail_change).detach();
+
         Self::init_data(cx, bridge.clone());
         Self {
             collapsed: false,
@@ -74,6 +115,7 @@ impl StockApp {
             menus,
             _bridge: bridge.clone(),
             app_state,
+            detail: None,
         }
     }
 
@@ -94,6 +136,36 @@ impl StockApp {
         })
         .detach();
     }
+
+    fn handle_detail_change(&mut self, _e: Entity<StockAppState>, cx: &mut Context<Self>) {
+        let target = self.app_state.read(cx).active_detail.clone();
+        match target {
+            None => {
+                self.close_detail(cx);
+            }
+            Some(t) => {
+                let stale = self
+                    .detail
+                    .as_ref()
+                    .map_or(true, |p| p.read(cx).target() != &t);
+
+                if stale {
+                    self.close_detail(cx);
+                    let bridge = self._bridge.clone();
+                    let app_state = self.app_state.clone();
+                    self.detail = Some(cx.new(|cx| DetailPanel::new(bridge, t, app_state, cx)))
+                }
+            }
+        }
+        cx.notify();
+    }
+    fn close_detail(&mut self, cx: &mut Context<Self>) {
+        if let Some(p) = self.detail.take() {
+            let a = p.read(cx);
+            a.stop_polling();
+        }
+    }
+
     fn render_main_content(
         &self,
         _window: &mut Window,
@@ -107,7 +179,9 @@ impl StockApp {
             .find(|item| item.key == self.active_key)
             .map(|i| i.panel.clone());
 
-        let content_elm = if let Some(panel) = content_panel {
+        let content_elm = if let Some(detail) = &self.detail {
+            detail.clone().into_any_element()
+        } else if let Some(panel) = content_panel {
             match panel {
                 AppPanel::Overview(v) => v.clone().into_any_element(),
                 AppPanel::Ranklist(v) => v.clone().into_any_element(),
