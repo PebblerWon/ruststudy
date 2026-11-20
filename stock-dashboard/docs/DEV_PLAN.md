@@ -9,17 +9,17 @@
 
 ### Crate 结构
 
-| Crate | 类型 | 包含模块 | 说明 |
-|-------|------|---------|------|
+| Crate          | 类型    | 包含模块      | 说明                                |
+| -------------- | ------- | ------------- | ----------------------------------- |
 | **stock-data** | library | common + data | 东财客户端、模型、缓存，无 GUI 依赖 |
-| **stock-app** | binary | ui | gpui 桌面应用，依赖 stock-data |
+| **stock-app**  | binary  | ui            | gpui 桌面应用，依赖 stock-data      |
 
-| 里程碑 | 阶段 | 核心交付物 | 预估 |
-|--------|------|-----------|------|
-| M1 | Phase 1 | 东财数据层（CLI 可验证） | ~1 周 |
-| M2 | Phase 2 | 总览 + 自选 + K 线桌面应用 | ~1.5 周 |
-| M3 | Phase 3 | 轮询实时刷新完整 MVP | ~0.5 周 |
-| M4 | Phase 4 | 分时/热力图/榜单（可选） | ~2 周 |
+| 里程碑 | 阶段    | 核心交付物                 | 预估    |
+| ------ | ------- | -------------------------- | ------- |
+| M1     | Phase 1 | 东财数据层（CLI 可验证）   | ~1 周   |
+| M2     | Phase 2 | 总览 + 自选 + K 线桌面应用 | ~1.5 周 |
+| M3     | Phase 3 | 轮询实时刷新完整 MVP       | ~0.5 周 |
+| M4     | Phase 4 | 分时/热力图/榜单（可选）   | ~2 周   |
 
 ---
 
@@ -103,8 +103,8 @@
 - [ ] **T4.3 热力图** — squarify treemap 布局纯函数 + gpui 自绘矩形网格，按涨跌幅/换手率着色
 - [ ] **T4.4 榜单** — clist 按 fid 排序翻页（涨幅/跌幅/成交额 Tab 切换）
 - [ ] **T4.5 搜索与选股扫描** — suggest 搜索加入自选；全市场快照 + 指标信号过滤
-- [ ] **T4.6 指数详情页** — 总览指数卡片点击进入详情页：行情头 + 当日分时图（价格线 + 均价线 + 昨收虚线，双 LineChart 叠层），导航走 app_state 单一事实源 + observe，轮询随页显式销毁，放入 **stock-data + stock-app**
-  - **产出：** index_secid/index_detail/index_timeline（stock-data）+ ui/index_detail_panel.rs + ui/polling_util.rs（stock-app）| **学习点：** 页面导航状态机、LineChart 槽位模式、轮询生命周期管理
+- [ ] **T4.6 详情页（通用骨架，指数先行）** — secid 参数化：总览指数卡片点击进入详情页（行情头 + 当日分时图，双 LineChart 叠层），DetailTarget 枚举 Index/Stock 双变体、DetailQuote 个股扩展字段 Option 化，个股入口零返工接入（tech/04 §4.10），导航走 app_state 单一事实源 + observe，轮询随页显式销毁，放入 **stock-data + stock-app**
+  - **产出：** index_secid/quote_detail/quote_timeline（stock-data）+ ui/detail_panel.rs + ui/polling_util.rs（stock-app）| **学习点：** secid 参数化协议、页面导航状态机、LineChart 槽位模式、轮询生命周期管理
   - **技术方案：** 见 [tech/04_index_detail.md](tech/04_index_detail.md)
 
 **阶段验收：** 热力图渲染全市场涨跌分布，点击格子进入个股详情
@@ -113,26 +113,26 @@
 
 ## 进度追踪表
 
-| 任务 | 状态 | 学习点 | 备注 |
-|------|------|--------|------|
-| T1.1 | ⬜ | cargo workspace、多 crate 依赖 | workspace 骨架 |
-| T1.2 | ⬜ | thiserror、自定义 Deserialize | 模型 + 容错反序列化（stock-data） |
-| T1.3 | ⬜ | reqwest 默认头、令牌桶限速 | 东财客户端骨架（stock-data） |
-| T1.4 | ⬜ | 分页拼装、CSV 解析、单位契约 | 解析与归一（stock-data） |
-| T1.5 | ⬜ | TTL 缓存、fixture 测试 | 缓存 + 测试（stock-data） |
-| T2.1 | ⬜ | gpui 启动、主题设计 | 应用骨架 + 语义色（stock-app） |
-| T2.2 | ⬜ | 卡片布局、Entity 更新 | 总览面板（stock-app） |
-| T2.3 | ⬜ | 本地持久化、列表渲染 | 自选面板（stock-app） |
-| T2.4 | ⬜ | CandlestickChart、数据窗口切片 | K 线图（stock-app） |
-| T2.5 | ⬜ | GUI 状态管理 | 数据接入 + 状态流转（stock-app） |
-| T3.1 | ⬜ | tokio interval、状态机 | 交易时段 + 轮询（stock-data） |
-| T3.2 | ⬜ | cx.spawn、cx.notify | UI 实时集成（stock-app） |
-| T3.3 | ⬜ | 指数退避、错误恢复 | 退避与容错 |
-| T4.1 | ⬜ | LineChart、基准线 | 分时图（可选） |
-| T4.2 | ⬜ | 指标迁移、叠加渲染 | 指标库（可选） |
-| T4.3 | ⬜ | gpui 自绘、treemap | 热力图（可选） |
-| T4.4 | ⬜ | 表格、Tab 切换 | 榜单（可选） |
-| T4.5 | ⬜ | suggest 接口、批量指标 | 搜索与扫描（可选） |
-| T4.6 | ⬜ | 页面导航状态机、LineChart 槽位、轮询生命周期 | 指数详情页（tech/04，含 T4.1 分时图） |
+| 任务 | 状态 | 学习点                                                 | 备注                                                |
+| ---- | ---- | ------------------------------------------------------ | --------------------------------------------------- |
+| T1.1 | ⬜   | cargo workspace、多 crate 依赖                         | workspace 骨架                                      |
+| T1.2 | ⬜   | thiserror、自定义 Deserialize                          | 模型 + 容错反序列化（stock-data）                   |
+| T1.3 | ⬜   | reqwest 默认头、令牌桶限速                             | 东财客户端骨架（stock-data）                        |
+| T1.4 | ⬜   | 分页拼装、CSV 解析、单位契约                           | 解析与归一（stock-data）                            |
+| T1.5 | ⬜   | TTL 缓存、fixture 测试                                 | 缓存 + 测试（stock-data）                           |
+| T2.1 | ⬜   | gpui 启动、主题设计                                    | 应用骨架 + 语义色（stock-app）                      |
+| T2.2 | ⬜   | 卡片布局、Entity 更新                                  | 总览面板（stock-app）                               |
+| T2.3 | ⬜   | 本地持久化、列表渲染                                   | 自选面板（stock-app）                               |
+| T2.4 | ⬜   | CandlestickChart、数据窗口切片                         | K 线图（stock-app）                                 |
+| T2.5 | ⬜   | GUI 状态管理                                           | 数据接入 + 状态流转（stock-app）                    |
+| T3.1 | ⬜   | tokio interval、状态机                                 | 交易时段 + 轮询（stock-data）                       |
+| T3.2 | ⬜   | cx.spawn、cx.notify                                    | UI 实时集成（stock-app）                            |
+| T3.3 | ⬜   | 指数退避、错误恢复                                     | 退避与容错                                          |
+| T4.1 | ⬜   | LineChart、基准线                                      | 分时图（可选）                                      |
+| T4.2 | ⬜   | 指标迁移、叠加渲染                                     | 指标库（可选）                                      |
+| T4.3 | ⬜   | gpui 自绘、treemap                                     | 热力图（可选）                                      |
+| T4.4 | ⬜   | 表格、Tab 切换                                         | 榜单（可选）                                        |
+| T4.5 | ⬜   | suggest 接口、批量指标                                 | 搜索与扫描（可选）                                  |
+| T4.6 | ⬜   | secid 参数化、导航状态机、LineChart 槽位、轮询生命周期 | 详情页通用骨架（tech/04），指数先行，含 T4.1 分时图 |
 
 **状态说明：** ⬜ 待开始 | 🔵 进行中 | ✅ 已完成 | ⏸ 暂停 | ❌ 已取消

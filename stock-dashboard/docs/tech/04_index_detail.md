@@ -1,14 +1,17 @@
-# 指数详情页：总览卡片点击 → 指数详情（T4.6）
+# 详情页：secid 参数化通用方案（指数先行，T4.6）
 
 > 对应 DEV_PLAN **T4.6**；分时图部分落地 **T4.1**（trends2 当日分时 + 均价线 + 昨收基准）。
+> **通用化修订（2026-11-20）**：详情页参数为完整 **secid**（"1.000001"/"0.600519"），指数与个股共用同一页面骨架、模型与数据链路；差异只在入口侧 secid 来源（指数查表 / 个股规则函数）与个股扩展字段渲染。本期 MVP 只落地指数入口，个股接入路径见 §4.10（通道已留，接入约半天）。文件名沿用 `04_index_detail.md`，避免引用链接失效。
 > 前置阅读：[01_data_layer.md §1.4.3 / §1.5.4](01_data_layer.md)（INDEX_SECIDS 与 trends2 实测契约）、[03_integration.md §3.3](03_integration.md)（DataBridge 桥接模式）。
 > 本文涉及的 gpui-kit 0.8.0 chart API 均已对照 cargo registry 的 gpui-component 0.8.0 源码核对（§4.6），实现时如遇 API 不符以实际版本为准并回写本文。
 
 ## 4.0 功能概述与范围
 
-一句话：**总览页指数卡片可点击，进入该指数的详情页（行情头 + 当日分时图），返回按钮 / 侧边栏切换退出详情页。**
+一句话：**详情页按 secid 参数化，指数与个股共用页面骨架与数据链路；本期 MVP：总览页指数卡片可点击，进入该指数的详情页（行情头 + 当日分时图），返回按钮 / 侧边栏切换退出详情页。**
 
 ### 4.0.1 页面原型
+
+（以指数为例；个股详情仅多一行换手/PE/PB/市值指标，见 §4.10.2 第 3 步）
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -29,30 +32,31 @@
 
 ### 4.0.2 范围界定
 
-| 做（MVP） | 不做（记录为后续扩展） |
-|-----------|------------------------|
-| 6 张指数卡片全部可点（上证指数为验收主案例） | 个股详情页（`DetailTarget` 枚举预留 `Stock` 变体，不实现） |
-| 行情头：价格/涨跌/开高低收/成交额/成交量 | 分时成交量副图（量柱） |
-| 当日分时图：价格线 + 均价线 + 昨收虚线 + 固定 242 槽位 + hover tooltip | 5 日分时（ndays>1 数据跨日不连续，见 §4.8 坑 6） |
-| 轮询实时刷新（盘中 5s / 收盘 60s，随页销毁） | y 轴涨跌幅双刻度（东财右轴样式） |
-| 交易时段感知、退避重试（复用 spawn_polling 现成骨架） | 日 K / 多周期切换 |
+| 做（MVP）                                                                                                                                       | 不做（记录为后续扩展）                                                                        |
+| ----------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| **通用骨架**：`DetailTarget`（Index+Stock 双变体）/ `DetailQuote`（个股扩展字段 Option）/ `quote_detail` / `quote_timeline` 全部按 secid 参数化 | 个股详情入口落地（通道已留，见 §4.10；榜单入口还需先补 StockBoard 的领涨股 code/market 字段） |
+| 6 张指数卡片全部可点（上证指数为验收主案例）                                                                                                    | 个股专属功能：日 K / 多周期 / 资金流 / F10                                                    |
+| 行情头：价格/涨跌/开高低收/成交额/成交量                                                                                                        | 分时成交量副图（量柱）                                                                        |
+| 当日分时图：价格线 + 均价线 + 昨收虚线 + 固定 242 槽位 + hover tooltip                                                                          | 5 日分时（ndays>1 数据跨日不连续，见 §4.8 坑 6）                                              |
+| 轮询实时刷新（盘中 5s / 收盘 60s，随页销毁）                                                                                                    | y 轴涨跌幅双刻度（东财右轴样式）                                                              |
+| 交易时段感知、退避重试（复用 spawn_polling 现成骨架）                                                                                           | 北交所个股 secid 规则扩展（现规则拒绝 8/4 开头）                                              |
 
 ### 4.0.3 涉及文件总表
 
-| 文件 | 动作 | 内容 |
-|------|------|------|
-| `crates/stock-data/src/data/normalize.rs` | 增量 | `shou_to_wanshou()` |
-| `crates/stock-data/src/common/models.rs` | 增量 | `IndexDetail` 模型 |
-| `crates/stock-data/src/data/eastmoney_types.rs` | 增量 | `parse_index_detail_row()` |
-| `crates/stock-data/src/data/eastmoney.rs` | 增量 | `index_secid()` / `index_detail()` / `index_timeline()` |
-| `crates/stock-data/src/lib.rs` | 增量 | 出口 `index_secid` / `INDEX_SECIDS` |
-| `crates/stock-app/src/bridge.rs` | 增量 | `start_polling_index_detail()` / `start_polling_index_timeline()` |
-| `crates/stock-app/src/ui/polling_util.rs` | **新建** | 跨面板泛型轮询启动模板（从 OverviewPanel 抽取） |
-| `crates/stock-app/src/ui/index_detail_panel.rs` | **新建** | 详情页面板 + 分时图 |
-| `crates/stock-app/src/ui/app.rs` | 增量 | `DetailTarget` / `active_detail` / observe / 渲染分流 |
-| `crates/stock-app/src/ui/overview_panel.rs` | 增量 | 卡片 `secid` / `on_click` / `cursor_pointer` |
-| `crates/stock-app/src/ui/theme.rs` | 增量 | 均价线语义色常量 |
-| `crates/stock-app/src/ui/mod.rs` | 增量 | `pub mod polling_util; pub mod index_detail_panel;` |
+| 文件                                            | 动作     | 内容                                                              |
+| ----------------------------------------------- | -------- | ----------------------------------------------------------------- |
+| `crates/stock-data/src/data/normalize.rs`       | 增量     | `shou_to_wanshou()`                                               |
+| `crates/stock-data/src/common/models.rs`        | 增量     | `DetailQuote` 模型                                                |
+| `crates/stock-data/src/data/eastmoney_types.rs` | 增量     | `parse_quote_detail_row()`                                        |
+| `crates/stock-data/src/data/eastmoney.rs`       | 增量     | `index_secid()` / `quote_detail()` / `quote_timeline()`           |
+| `crates/stock-data/src/lib.rs`                  | 增量     | 出口 `index_secid` / `INDEX_SECIDS`                               |
+| `crates/stock-app/src/bridge.rs`                | 增量     | `start_polling_quote_detail()` / `start_polling_quote_timeline()` |
+| `crates/stock-app/src/ui/polling_util.rs`       | **新建** | 跨面板泛型轮询启动模板（从 OverviewPanel 抽取）                   |
+| `crates/stock-app/src/ui/detail_panel.rs`       | **新建** | 详情页面板 + 分时图                                               |
+| `crates/stock-app/src/ui/app.rs`                | 增量     | `DetailTarget` / `active_detail` / observe / 渲染分流             |
+| `crates/stock-app/src/ui/overview_panel.rs`     | 增量     | 卡片 `secid` / `on_click` / `cursor_pointer`                      |
+| `crates/stock-app/src/ui/theme.rs`              | 增量     | 均价线语义色常量                                                  |
+| `crates/stock-app/src/ui/mod.rs`                | 增量     | `pub mod polling_util; pub mod detail_panel;`                     |
 
 ---
 
@@ -64,26 +68,54 @@
 
 备选方案对比（为什么不选）：
 
-| 方案 | 做法 | 结论 |
-|------|------|------|
-| **A. app_state 请求字段**（采用） | 卡片点击写 `active_detail`，StockApp observe 消费 | ✅ 与既有模式同构；将来榜单点击领涨股打开个股详情页可复用同一通道 |
-| B. OverviewPanel 构造传入回调闭包 | 闭包持有 StockApp 的 WeakEntity | ❌ `StockApp::new` 里先建 panel 后有 self，构造顺序死锁 |
-| C. 详情页加为侧边栏菜单项 | `AppPanel::IndexDetail(...)` | ❌ 详情页不是导航目标，是叠加页面；菜单里不该出现 |
-| D. OverviewPanel 内部自切换 | panel 自己 render 详情页 | ❌ 导航职责散落到面板；侧边栏切换无法感知，轮询清理要跨两层协调 |
+| 方案                              | 做法                                                                           | 结论                                                                                      |
+| --------------------------------- | ------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| **A. app_state 请求字段**（采用） | 入口点击写 `active_detail`（DetailTarget::Index/Stock），StockApp observe 消费 | ✅ 与既有模式同构；指数与个股入口共用同一通道，将来榜单点击领涨股打开个股详情页零协议改动 |
+| B. OverviewPanel 构造传入回调闭包 | 闭包持有 StockApp 的 WeakEntity                                                | ❌ `StockApp::new` 里先建 panel 后有 self，构造顺序死锁                                   |
+| C. 详情页加为侧边栏菜单项         | `AppPanel::Detail(...)`                                                        | ❌ 详情页不是导航目标，是叠加页面；菜单里不该出现                                         |
+| D. OverviewPanel 内部自切换       | panel 自己 render 详情页                                                       | ❌ 导航职责散落到面板；侧边栏切换无法感知，轮询清理要跨两层协调                           |
 
 ### 4.1.2 状态与类型（app.rs）
 
 ```rust
 // app.rs
 
-/// 详情页目标（MVP 仅指数；个股详情将来加 Stock 变体，页面骨架复用）
+/// 详情页目标——**secid 参数化的通用导航协议**。
+/// 全链路只携带完整 secid（"1.000001"/"0.600519"），任何环节禁止从 code 反推市场
+/// （000001 沪是上证指数、深是平安银行，§4.8 坑 1）。
+/// MVP 仅落地 Index 入口；Stock 变体骨架同步就位，接入路径见 §4.10。
 #[derive(Clone, PartialEq)]
 pub enum DetailTarget {
     Index {
-        secid: String, // 完整 secid："1.000001"——导航链路全程携带，任何环节禁止反推
+        secid: String, // 完整 secid："1.000001"——经 index_secid() 查表获得
         code: String,  // 展示用 "000001"
         name: String,  // 展示用 "上证指数"
     },
+    Stock {
+        secid: String, // 完整 secid："0.600519"——经 secid() 规则函数或 f13.f12 拼接
+        code: String,
+        name: String,
+    },
+}
+
+impl DetailTarget {
+    /// 用访问器代替解构：三个字段所有变体同名，match 穷尽收敛在这一处；
+    /// 将来加变体（如 ETF）面板/桥接层零改动
+    pub fn secid(&self) -> &str {
+        match self {
+            Self::Index { secid, .. } | Self::Stock { secid, .. } => secid,
+        }
+    }
+    pub fn code(&self) -> &str {
+        match self {
+            Self::Index { code, .. } | Self::Stock { code, .. } => code,
+        }
+    }
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Index { name, .. } | Self::Stock { name, .. } => name,
+        }
+    }
 }
 
 pub struct StockAppState {
@@ -93,7 +125,7 @@ pub struct StockAppState {
 
 pub struct StockApp {
     // ...现有字段不动...
-    detail: Option<Entity<IndexDetailPanel>>, // 新增：已创建的详情页 Entity 缓存
+    detail: Option<Entity<DetailPanel>>, // 新增：已创建的详情页 Entity 缓存
 }
 ```
 
@@ -104,10 +136,10 @@ pub struct StockApp {
       └─▶ app_state.active_detail = Some(Index{..}) + notify
             └─▶ StockApp::handle_detail_change（observe 触发）
                   ├─ 与当前 detail.target 相同 → 忽略（防重复创建）
-                  └─ 不同/未打开 → stop 旧轮询 → cx.new(IndexDetailPanel) → 缓存
+                  └─ 不同/未打开 → stop 旧轮询 → cx.new(DetailPanel) → 缓存
                         └─▶ render_main_content：detail 优先渲染
 
-返回：IndexDetailPanel "← 返回" on_click
+返回：DetailPanel "← 返回" on_click
       └─▶ app_state.active_detail = None + notify
             └─▶ StockApp::handle_detail_change
                   └─▶ close_detail()：stop_polling() → Entity 释放
@@ -138,7 +170,7 @@ fn handle_detail_change(&mut self, _e: Entity<StockAppState>, cx: &mut Context<S
                 let bridge = self._bridge.clone();
                 let app_state = self.app_state.clone();
                 self.detail = Some(cx.new(|cx| {
-                    IndexDetailPanel::new(bridge, t, app_state, cx)
+                    DetailPanel::new(bridge, t, app_state, cx)
                 }));
             }
         }
@@ -147,7 +179,7 @@ fn handle_detail_change(&mut self, _e: Entity<StockAppState>, cx: &mut Context<S
 }
 
 /// 关闭详情页。⚠️ PollingHandle drop 不会停止任务（01 §1.6.3 设计如此），
-/// 必须显式 stop，否则返回总览后每 5s 仍在打 index_detail + trends2
+/// 必须显式 stop，否则返回总览后每 5s 仍在打 quote_detail + trends2
 fn close_detail(&mut self, cx: &mut Context<Self>) {
     if let Some(p) = self.detail.take() {
         p.read(cx).stop_polling();
@@ -192,6 +224,8 @@ let content_elm = if let Some(detail) = &self.detail {
 
 **为什么必须查表而不能复用 `secid()`**：`secid()` 是个股市场规则（00/30 开头 → 深市 `0.`）。指数代码 `000001` 会被映射成 `0.000001`——深市**平安银行**；`399001` 的 39 前缀直接被拒。指数与个股是两套 secid 体系，01 §1.4.3 已明确"指数走显式 secid 常量，不经 secid() 规则函数"。
 
+> **个股入口不走这张表**：`secid()` 规则函数对个股完全可靠（60/68→`1.`、00/30→`0.`——它的缺陷只在指数代码撞车）；数据源自带 f13（market）+ f12（code）时优先 `f13.f12` 拼接，连规则都不用猜。两套入口各自可靠，详情页内部零反推（§4.10.1）。
+
 ```rust
 // eastmoney.rs — INDEX_SECIDS 旁
 
@@ -224,20 +258,29 @@ mod index_secid_tests {
 pub use data::eastmoney::{index_secid, INDEX_SECIDS, EastmoneyClient, spawn_polling, PollingHandle};
 ```
 
-### 4.2.2 IndexDetail 模型（models.rs）
+### 4.2.2 DetailQuote 模型（models.rs）
 
-详情页行情头需要的字段比 `IndexQuote`（只有价格/涨跌/成交额）多开高低收与成交量。新建专用模型而不是复用 `Quote`——指数无市值/换手率（f20/f21/f8 返 `"-"`），复用会带进一堆恒 0 字段误导渲染。
+详情页行情头需要的字段比 `IndexQuote`（只有价格/涨跌/成交额）多开高低收与成交量。新建通用模型 `DetailQuote` 而不是复用 `Quote`——`Quote` 是个股全字段模型，指数没有市值/换手率（f20/f21/f8 返 `"-"`），复用会带进一堆恒 0 字段误导渲染；反向同理，个股扩展字段在 `DetailQuote` 里全部 `Option` 化，指数详情自然为 `None`，一套模型两种证券。
+
+需要补一个解析 helper（eastmoney_types.rs 现有 helper 只有 `f64_field`/`str_field`/`take_data`）：
+
+```rust
+/// `"-"`（停牌/指数无此字段）→ None，数字 → Some；个股扩展字段专用
+pub fn opt_f64_field(row: &Value, key: &str) -> Option<f64> {
+    row[key].as_f64()
+}
+```
 
 ```rust
 // models.rs 追加
 
-/// 指数详情快照（详情页行情头）
+/// 详情页快照（行情头）——指数/个股通用，按 secid 参数化
 /// ⚠️ 单位契约：成交额亿元、成交量万手（出口归一，UI 禁止再换算）
-/// 指数无市值/换手率字段（f20/f21/f8 为 "-"），不建模
+/// 个股扩展字段全部 Option：指数接口返 "-" → None → UI 不渲染该行（无需类型判断）
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct IndexDetail {
-    pub code: String,    // "000001"
-    pub name: String,    // "上证指数"
+pub struct DetailQuote {
+    pub code: String,    // "000001"（指数）/ "600519"（个股）
+    pub name: String,    // "上证指数" / "贵州茅台"
     pub price: f64,
     pub change: f64,
     pub change_pct: f64, // %
@@ -246,7 +289,13 @@ pub struct IndexDetail {
     pub low: f64,
     pub pre_close: f64,
     pub amount: f64,     // 亿元
-    pub volume: f64,     // 万手
+    pub volume: f64,     // 万手（个股极小成交量可能 <0.1，MVP 统一 {:.2} 万手，不做动态单位）
+    // ---- 个股扩展（指数为 None；字段号见 01 §1.5 ulist 契约）----
+    pub turnover_rate: Option<f64>, // 换手率 %（f8）
+    pub pe: Option<f64>,            // 市盈率·动（f9）
+    pub pb: Option<f64>,            // 市净率（f23）
+    pub total_mv: Option<f64>,      // 总市值 亿元（f20，元→亿）
+    pub circ_mv: Option<f64>,       // 流通市值 亿元（f21，元→亿）
 }
 ```
 
@@ -257,12 +306,12 @@ pub struct IndexDetail {
 pub fn shou_to_wanshou(v: f64) -> f64 { v / 1e4 }
 ```
 
-### 4.2.4 parse_index_detail_row（eastmoney_types.rs）
+### 4.2.4 parse_quote_detail_row（eastmoney_types.rs）
 
 ```rust
-/// ulist 行 → IndexDetail（出口单位：amount 亿元、volume 万手）
-pub fn parse_index_detail_row(row: &Value) -> IndexDetail {
-    IndexDetail {
+/// ulist 行 → DetailQuote（出口单位：amount 亿元、volume 万手；个股扩展字段 "-" → None）
+pub fn parse_quote_detail_row(row: &Value) -> DetailQuote {
+    DetailQuote {
         code: str_field(row, "f12").to_string(),
         name: str_field(row, "f14").to_string(),
         price: f64_field(row, "f2"),
@@ -274,42 +323,50 @@ pub fn parse_index_detail_row(row: &Value) -> IndexDetail {
         pre_close: f64_field(row, "f18"),
         amount: norm::yuan_to_yi(f64_field(row, "f6")),     // 元 → 亿元
         volume: norm::shou_to_wanshou(f64_field(row, "f5")), // 手 → 万手
+        // 个股扩展："-" → None（指数）；数值 → Some（个股）
+        turnover_rate: opt_f64_field(row, "f8"),
+        pe: opt_f64_field(row, "f9"),
+        pb: opt_f64_field(row, "f23"),
+        total_mv: opt_f64_field(row, "f20").map(norm::yuan_to_yi), // 元 → 亿元
+        circ_mv: opt_f64_field(row, "f21").map(norm::yuan_to_yi),
     }
 }
 ```
 
 ### 4.2.5 客户端方法（eastmoney.rs）
 
-两个新方法都**接收完整 secid**，把"指数不走 secid()"的约束压在签名上——调用方传代码也过不了编译期检查不了，但方法名与文档注释双保险：
+两个新方法都**接收完整 secid**，把"指数不走 secid()"的约束压在签名上——调用方传代码也过不了编译期检查不了，但方法名与文档注释双保险。方法本身对指数/个股通用（同一 ulist / trends2 接口），差异只在**入口侧 secid 的来源**（指数查表 / 个股规则函数，§4.10.1），不在数据层：
 
 ```rust
 impl EastmoneyClient {
-    /// 指数详情快照（ulist.np，单 secid）。
-    /// ⚠️ secid 必须是完整形态（"1.000001"），经 index_secid() 查表获得；
-    /// 指数严禁走 secid() 规则函数（000001 会映射成平安银行 0.000001）
-    pub async fn index_detail(&self, secid: &str) -> Result<IndexDetail> {
+    /// 详情页快照（ulist.np，单 secid，指数/个股通用）。
+    /// ⚠️ secid 必须是完整形态：指数经 index_secid() 查表获得；
+    /// 指数严禁走 secid() 规则函数（000001 会映射成平安银行 0.000001）；
+    /// 个股经 secid() 规则函数是安全的（§4.10.1）
+    pub async fn quote_detail(&self, secid: &str) -> Result<DetailQuote> {
         let url = format!(
             "{}/ulist.np/get?fltt=2&invt=2&secids={secid}\
-             &fields=f2,f3,f4,f5,f6,f12,f14,f15,f16,f17,f18",
+             &fields=f2,f3,f4,f5,f6,f8,f9,f12,f14,f15,f16,f17,f18,f20,f21,f23",
             self.base_q,
         );
         let v = self.get_json(&url).await?;
-        let data = raw::take_data(&v, "ulist-index-detail")?;
+        let data = raw::take_data(&v, "ulist-quote-detail")?;
         let rows = data["diff"].as_array().unwrap_or(&vec![]);
         rows.first()
-            .map(raw::parse_index_detail_row)
-            .ok_or_else(|| DataError::Api(format!("index_detail 空数据: {secid}")))
+            .map(raw::parse_quote_detail_row)
+            .ok_or_else(|| DataError::Api(format!("quote_detail 空数据: {secid}")))
     }
 
-    /// 指数当日分时（trends2，ndays 固定 1；接口契约见 01 §1.5.4，2026-10-23 实测）
-    pub async fn index_timeline(&self, secid: &str) -> Result<Timeline> {
+    /// 当日分时（trends2，ndays 固定 1；指数/个股通用，f51-f58 字段契约一致；
+    /// 接口契约见 01 §1.5.4，2026-10-23 实测）
+    pub async fn quote_timeline(&self, secid: &str) -> Result<Timeline> {
         let url = format!(
             "{}/stock/trends2/get?secid={secid}&fields1=f1,f2,f3,f7,f8\
              &fields2=f51,f52,f53,f54,f55,f56,f57,f58&iscr=0&ndays=1",
             self.base_his,
         );
         let v = self.get_json(&url).await?;
-        let data = raw::take_data(&v, "trends2-index")?;
+        let data = raw::take_data(&v, "trends2-quote")?;
         Ok(Timeline {
             code: raw::str_field(data, "code").to_string(),
             pre_close: raw::f64_field(data, "preClose"),
@@ -339,10 +396,10 @@ impl EastmoneyClient {
 // bridge.rs 追加两个方法（注释模板与现有方法一致）
 
 /// 启动轮询：指数详情快照（详情页行情头）
-pub fn start_polling_index_detail(
+pub fn start_polling_quote_detail(
     &self,
     secid: String,
-    tx: async_channel::Sender<stock_data::IndexDetail>,
+    tx: async_channel::Sender<stock_data::DetailQuote>,
 ) -> PollingHandle {
     let client = self.client.clone();
     self.rt.block_on(async move {
@@ -350,7 +407,7 @@ pub fn start_polling_index_detail(
             move || {
                 let client = client.clone();
                 let secid = secid.clone();
-                async move { client.index_detail(&secid).await }
+                async move { client.quote_detail(&secid).await }
             },
             move |data| {
                 let _ = tx.try_send(data);
@@ -360,7 +417,7 @@ pub fn start_polling_index_detail(
 }
 
 /// 启动轮询：指数当日分时
-pub fn start_polling_index_timeline(
+pub fn start_polling_quote_timeline(
     &self,
     secid: String,
     tx: async_channel::Sender<stock_data::Timeline>,
@@ -371,7 +428,7 @@ pub fn start_polling_index_timeline(
             move || {
                 let client = client.clone();
                 let secid = secid.clone();
-                async move { client.index_timeline(&secid).await }
+                async move { client.quote_timeline(&secid).await }
             },
             move |data| {
                 let _ = tx.try_send(data);
@@ -506,7 +563,7 @@ fn render_snapshot_card(&self, ix: usize, snap: &IndexSnapshot, cx: &mut Context
 pub const AVG_PRICE_COLOR: Rgba = rgb(0xE6A23C);
 ```
 
-### 4.4.4 IndexDetailPanel（ui/index_detail_panel.rs，新建）
+### 4.4.4 DetailPanel（ui/detail_panel.rs，新建）
 
 ```rust
 use std::sync::Arc;
@@ -524,42 +581,44 @@ use gpui_kit::{
     component::chart::LineChart,
     *,
 };
-use stock_data::{IndexDetail, PollingHandle, Timeline};
+use stock_data::{DetailQuote, PollingHandle, Timeline};
 
 /// 分时图固定槽位：09:30-11:30 共 121 点 + 13:00-15:00 共 121 点
 const TIMELINE_SLOTS: usize = 242;
 
-pub struct IndexDetailPanel {
+pub struct DetailPanel {
     target: DetailTarget,
     app_state: Entity<StockAppState>,
     /// 持有 bridge：保住 tokio runtime 生命周期（同 OverviewPanel._bridge）
     _bridge: Arc<DataBridge>,
     polling_handles: Vec<PollingHandle>,
-    detail: Option<IndexDetail>,
+    detail: Option<DetailQuote>,
     timeline: Option<Timeline>,
 }
 
-impl IndexDetailPanel {
+impl DetailPanel {
     pub fn new(
         bridge: Arc<DataBridge>,
         target: DetailTarget,
         app_state: Entity<StockAppState>,
         cx: &mut Context<Self>,
     ) -> Self {
-        let DetailTarget::Index { secid, .. } = target.clone();
+        // 访问器替代解构：Index/Stock 变体通用（解构会把面板绑死在指数变体上，
+        // 加 Stock 变体后 match 不穷尽直接编译失败）
+        let secid = target.secid().to_string();
 
         // 直接接轮询，不写"先一次性请求再开轮询"的双通道：
         // spawn_polling 循环是先 fetch 后 sleep，启动即有首帧（polling.rs 既有行为）
         let handle_detail = spawn_polling_loop(
             bridge.clone(),
             cx,
-            move |bridge, tx| bridge.start_polling_index_detail(secid.clone(), tx),
+            move |bridge, tx| bridge.start_polling_quote_detail(secid.clone(), tx),
             |s: &mut Self, data| s.detail = Some(data),
         );
         let handle_timeline = spawn_polling_loop(
             bridge.clone(),
             cx,
-            move |bridge, tx| bridge.start_polling_index_timeline(secid.clone(), tx),
+            move |bridge, tx| bridge.start_polling_quote_timeline(secid.clone(), tx),
             |s: &mut Self, data| s.timeline = Some(data),
         );
 
@@ -598,7 +657,7 @@ impl IndexDetailPanel {
 ### 4.4.5 详情页渲染骨架
 
 ```rust
-impl Render for IndexDetailPanel {
+impl Render for DetailPanel {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
             .h_full()
@@ -614,7 +673,7 @@ impl Render for IndexDetailPanel {
 /// 头部：返回按钮 + 名称/代码 + 价格大字 + 涨跌额/幅（相对昨收着色）
 fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let theme = theme_palette(cx);
-    let DetailTarget::Index { code, name, .. } = self.target.clone();
+    let (code, name) = (self.target.code().to_string(), self.target.name().to_string());
     let d = self.detail.as_ref();
     let color = d.map_or(theme.text_secondary, |x| {
         if x.price >= x.pre_close { theme.color_rise } else { theme.color_fall }
@@ -640,6 +699,9 @@ fn render_header(&self, cx: &mut Context<Self>) -> impl IntoElement {
 
 /// 指标行：今开 / 最高 / 最低 / 昨收 / 成交额(亿) / 成交量(万手) 六格
 /// 每格 v_flex：label（text_xs，text_tertiary）+ value（text_sm，相对昨收着色）
+/// 个股详情在本行之下追加一行：换手率 / PE / PB / 总市值 / 流通市值 ——
+/// 用 when_some 逐格挂载，Option 为 None 的格子不渲染；指数扩展字段全为 None，
+/// 这行自然消失，无需 match DetailTarget 判断类型（§4.10.2 第 3 步）
 fn render_quote_grid(&self, cx: &mut Context<Self>) -> impl IntoElement {
     let theme = theme_palette(cx);
     let d = self.detail.as_ref();
@@ -647,6 +709,8 @@ fn render_quote_grid(&self, cx: &mut Context<Self>) -> impl IntoElement {
     // ⚠️ 显示文案直接用已归一字段：amount 亿元、volume 万手，禁止 UI 再换算
     // 结构：h_flex().justify_between() + 六个 v_flex 格子（实现略，照头部着色规则）
     // ...（照 4.0.1 原型实现，约 60 行）
+    // 个股扩展行（指数为 None 时整行不渲染，when_some 逐格挂载）：
+    //   换手率 {:.2}% / PE {:.1} / PB {:.2} / 总市值 {:.0}亿 / 流通市值 {:.0}亿
     # unimplemented_placeholder()
 }
 
@@ -737,37 +801,37 @@ OverviewPanel（总览）                StockAppState（共享 Entity）
        ▲                                    │ observe
        │                              StockApp::handle_detail_change
   render_main_content                       │
-  （detail 优先渲染）        ┌── Some(新 target) ─▶ close 旧 + cx.new(IndexDetailPanel)
+  （detail 优先渲染）        ┌── Some(新 target) ─▶ close 旧 + cx.new(DetailPanel)
                              └── None ───────────▶ close_detail(): stop_polling + 释放
                                           │
-                    IndexDetailPanel ◀────┘
+                    DetailPanel ◀────┘
                       │ spawn_polling_loop ×2
                       ▼
-             bridge.start_polling_index_detail / index_timeline
+             bridge.start_polling_quote_detail / quote_timeline
                       │ spawn_polling（tokio，盘中 5s/收盘 60s/退避）
                       ▼
-             EastmoneyClient.index_detail / index_timeline
+             EastmoneyClient.quote_detail / quote_timeline
                       │ async_channel（tokio → gpui）
                       ▼
-             IndexDetailPanel 状态回填 + cx.notify → 重渲染
+             DetailPanel 状态回填 + cx.notify → 重渲染
 ```
 
 ---
 
 ## 4.6 gpui-kit 0.8.0 分时图 API 核对表（2026-11-19 对照 registry 源码）
 
-| API | 行为（gpui-component 0.8.0 `src/chart/line_chart.rs`） |
-|-----|------|
-| `.point_count(n)` | x 轴按 n 个等距槽位布局，数据从首槽**连续**填充，未到的槽位留空——源码文档原话即 *"as an intraday chart does before the close"*，为本功能量身定做 |
-| `.reference_line(v)` | 在 y=v 画横跨绘图区的虚线——原话即 *"such as a previous close"* |
-| `.y_domain(min, max)` | 钉死 y 轴（默认自动缩放会把分时压扁）；min==max 时整图不画 |
-| `.y_axis(true)` + `.y_tick_format(f)` | 左侧 gutter 显示刻度（默认 5 档，`AxisLabelPlacement::Outside` 自动测宽） |
-| `.x_tick_count(n)` | 标签均匀铺满**全部槽位**；落在数据之外（未交易时段）的槽不画 |
-| `.linear()` | 折线（默认 curve 之外另有 natural/step_after） |
-| `.interactive(false)` | 去掉 hitbox：不响应 hover、不出 tooltip——叠层底层专用 |
-| `.name()` / `.tooltip_value()` / `.tooltip_value_color()` | hover 十字线 tooltip 的行名/文案/着色 |
-| `.id(...)` | 默认取构造点 caller_id，显式命名防两图撞 id（同层兄弟节点） |
-| `.appear_key(k)` | **不要用**：轮询每次更新数据都会重放入场动画，图会每 5s 闪一次；不设 key 时数据自动原地重绘 |
+| API                                                       | 行为（gpui-component 0.8.0 `src/chart/line_chart.rs`）                                                                                           |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `.point_count(n)`                                         | x 轴按 n 个等距槽位布局，数据从首槽**连续**填充，未到的槽位留空——源码文档原话即 _"as an intraday chart does before the close"_，为本功能量身定做 |
+| `.reference_line(v)`                                      | 在 y=v 画横跨绘图区的虚线——原话即 _"such as a previous close"_                                                                                   |
+| `.y_domain(min, max)`                                     | 钉死 y 轴（默认自动缩放会把分时压扁）；min==max 时整图不画                                                                                       |
+| `.y_axis(true)` + `.y_tick_format(f)`                     | 左侧 gutter 显示刻度（默认 5 档，`AxisLabelPlacement::Outside` 自动测宽）                                                                        |
+| `.x_tick_count(n)`                                        | 标签均匀铺满**全部槽位**；落在数据之外（未交易时段）的槽不画                                                                                     |
+| `.linear()`                                               | 折线（默认 curve 之外另有 natural/step_after）                                                                                                   |
+| `.interactive(false)`                                     | 去掉 hitbox：不响应 hover、不出 tooltip——叠层底层专用                                                                                            |
+| `.name()` / `.tooltip_value()` / `.tooltip_value_color()` | hover 十字线 tooltip 的行名/文案/着色                                                                                                            |
+| `.id(...)`                                                | 默认取构造点 caller_id，显式命名防两图撞 id（同层兄弟节点）                                                                                      |
+| `.appear_key(k)`                                          | **不要用**：轮询每次更新数据都会重放入场动画，图会每 5s 闪一次；不设 key 时数据自动原地重绘                                                      |
 
 导入路径：`use gpui_kit::component::chart::LineChart;`（gpui-kit 0.8.0 将 gpui-component 转发为 `gpui_kit::component`）。`X` 泛型约束 `PartialEq + Into<SharedString>`，`String` 满足；`Y` 需实现 `PlotValue`，`f64` 满足。
 
@@ -777,22 +841,23 @@ OverviewPanel（总览）                StockAppState（共享 Entity）
 
 ### 4.7.1 stock-data 单测（普通 `#[test]`）
 
-| 对象 | 断言要点 |
-|------|---------|
-| `index_secid` | 000001→1.000001、399001→0.399001、个股代码→None（§4.2.1 已给代码） |
-| `shou_to_wanshou` | 4.8e8 手 → 4.8e4 万手、0 值 |
-| `parse_index_detail_row` | fixture 行 → 字段映射、amount 元→亿、volume 手→万手 |
-| `y_domain`（stock-app） | 横盘（spread 兜底）、涨停单边、昨收居中对称 |
+| 对象                     | 断言要点                                                                                                    |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------- |
+| `index_secid`            | 000001→1.000001、399001→0.399001、个股代码→None（§4.2.1 已给代码）                                          |
+| `shou_to_wanshou`        | 4.8e8 手 → 4.8e4 万手、0 值                                                                                 |
+| `parse_quote_detail_row` | fixture 行 → 字段映射、amount 元→亿、volume 手→万手；个股 fixture 扩展字段 Some、指数 fixture 扩展字段 None |
+| `opt_f64_field`          | 数字→Some、`"-"`→None                                                                                       |
+| `y_domain`（stock-app）  | 横盘（spread 兜底）、涨停单边、昨收居中对称                                                                 |
 
 ### 4.7.2 wiremock 集成测试（`stock-data/tests/http_tests.rs` 追加）
 
-fixture 新增 `tests/fixtures/eastmoney/index_detail.json`（ulist 单行，f6/f5 用真实量级），trends2 复用 §1.7.2 规划的 `trends.json`：
+fixture 新增 `tests/fixtures/eastmoney/quote_detail.json`（指数 ulist 单行，f6/f5 用真实量级）与 `quote_detail_stock.json`（个股单行，含 f8/f9/f20/f21/f23 扩展字段），trends2 复用 §1.7.2 规划的 `trends.json`：
 
 ```rust
 #[tokio::test]
-async fn index_detail_parses_units() {
+async fn quote_detail_parses_units() {
     let server = MockServer::start().await;
-    let fixture = std::fs::read_to_string("tests/fixtures/eastmoney/index_detail.json").unwrap();
+    let fixture = std::fs::read_to_string("tests/fixtures/eastmoney/quote_detail.json").unwrap();
     Mock::given(method("GET"))
         .and(path("/api/qt/ulist.np/get"))
         .and(query_param("secids", "1.000001"))
@@ -804,13 +869,21 @@ async fn index_detail_parses_units() {
         "http://unused".into(),              // base_his
         "http://unused".into(),              // base_dc
     ).unwrap();
-    let d = client.index_detail("1.000001").await.unwrap();
+    let d = client.quote_detail("1.000001").await.unwrap();
     assert_eq!(d.code, "000001");
     assert!(d.amount > 1000.0 && d.volume > 10000.0); // 亿元/万手量级
 }
 
 #[tokio::test]
-async fn index_timeline_parses_pre_close_and_points() {
+async fn quote_detail_parses_stock_fields() {
+    // 同款模板：query_param("secids", "0.600519") + fixture quote_detail_stock.json
+    //（f8/f9/f23/f20/f21 用真实量级）
+    // 断言：turnover_rate/pe/pb/total_mv/circ_mv 全为 Some，且 total_mv 单位为亿元
+    //（f20 原始值元 → 亿元，量级差 8 个数量级）
+}
+
+#[tokio::test]
+async fn quote_timeline_parses_pre_close_and_points() {
     // 同款模板：path("/api/qt/stock/trends2/get") + query_param("secid", "1.000001")，
     // with_base_url 第二参指向 mock；断言 pre_close 与 points 非空
 }
@@ -821,13 +894,18 @@ async fn index_timeline_parses_pre_close_and_points() {
 ```rust
 #[tokio::test]
 #[ignore = "需要真实网络"]
-async fn smoke_index_detail_and_timeline() {
+async fn smoke_quote_detail_and_timeline() {
     let client = EastmoneyClient::new().unwrap();
-    let d = client.index_detail("1.000001").await.unwrap();
+    let d = client.quote_detail("1.000001").await.unwrap();
     assert!(d.price > 0.0 && d.pre_close > 0.0 && d.amount > 0.0);
-    let t = client.index_timeline("1.000001").await.unwrap();
+    let t = client.quote_timeline("1.000001").await.unwrap();
     assert!(t.pre_close > 0.0 && t.points.len() > 100);
     assert_eq!(t.points[0].time, "09:30"); // 首点即开盘分钟
+
+    // 个股：同链路 + 扩展字段
+    let s = client.quote_detail("0.600519").await.unwrap(); // 贵州茅台
+    assert!(s.turnover_rate.is_some() && s.total_mv.is_some());
+    let _ = client.quote_timeline("0.600519").await.unwrap();
 }
 ```
 
@@ -838,7 +916,7 @@ async fn smoke_index_detail_and_timeline() {
 - [ ] 均价线与价格线 x 对齐（同一时刻竖直对应，无整体错位）
 - [ ] 昨收虚线位置与东财网页一致；y 域上下对称于昨收
 - [ ] hover 图表出十字线 + tooltip，tooltip 值红绿着色
-- [ ] "← 返回" → 回总览；**返回后观察日志/RUST_LOG=info 确认 index_detail 与 trends2 请求停止**（轮询已 stop）
+- [ ] "← 返回" → 回总览；**返回后观察日志/RUST_LOG=info 确认 quote_detail 与 trends2 请求停止**（轮询已 stop）
 - [ ] 详情页打开时点侧边栏"榜单" → 详情页关闭、轮询停止、榜单正常渲染
 - [ ] 详情页打开时点击"深证成指"卡片 → 面板切换为深成详情，旧轮询停止（不叠加）
 - [ ] 收盘时段打开详情页：分时图完整（~242 点），状态轮询 60s 降频
@@ -849,29 +927,58 @@ async fn smoke_index_detail_and_timeline() {
 
 ## 4.8 踩坑清单（实现前通读）
 
-1. **指数 secid 严禁走 `secid()`**：个股规则会把 000001 映射成平安银行 `0.000001`。全部新方法收完整 secid，入口唯一来源是 `index_secid()` 查表（01 §1.4.3 已定约定，本功能是第一个把"指数 secid"穿到 UI 的链路，链路上任何环节禁止反推）。
-2. **PollingHandle drop 不停任务**：详情页关闭/替换前必须显式 `stop_polling()`（§4.1.4 close_detail）。漏掉的后果：返回总览后每 5s 仍打 index_detail + trends2；把 6 张卡各点一遍 = 12 个僵尸轮询任务，限速桶被拖慢，总览刷新跟着变卡。
+1. **指数 secid 严禁走 `secid()`，个股入口不受此限**：个股规则会把 000001 映射成平安银行 `0.000001`，指数入口唯一来源是 `index_secid()` 查表；个股入口走 `secid()` 规则函数是安全的（缺陷只在指数代码撞车），数据源自带 f13+f12 时优先拼接（§4.2.1 / §4.10.1）。全链路禁止任何环节从 code 反推市场。
+2. **PollingHandle drop 不停任务**：详情页关闭/替换前必须显式 `stop_polling()`（§4.1.4 close_detail）。漏掉的后果：返回总览后每 5s 仍打 quote_detail + trends2；把 6 张卡各点一遍 = 12 个僵尸轮询任务，限速桶被拖慢，总览刷新跟着变卡。
 3. **双图表叠层必须同 y_domain + 同 y_axis + 同 y_tick_format**：两层各自测量刻度 gutter，文案不同 → gutter 宽度不同 → 绘图区左缘错位 → 两条线 x 对不上。这是叠层方案唯一的对齐契约。
-4. **y_domain 相等时 LineChat 整图不画**：横盘日/异常数据（pre_close=0）必须走 `y_domain()` 的最小振幅兜底 + 空态占位，否则详情页白屏一块。
+4. **y_domain 相等时 LineChart 整图不画**：横盘日/异常数据（pre_close=0）必须走 `y_domain()` 的最小振幅兜底 + 空态占位，否则详情页白屏一块。
 5. **`point_count` 要求数据从首槽连续**：trends2 ndays=1 天然连续可直接用；将来做 5 日分时（ndays>1）跨日不连续，不能直接套 point_count，需另做槽位映射（已列入不做范围）。
 6. **不要设 `appear_key`**：轮询每 5s 更新数据会重放入场动画；不设 key 时数据原地重绘。
 7. **`render_snapshot_card` 需要加 `cx` 参数**：现有签名 `(ix, snap)` 没有 cx，挂 listener 会编译失败；`render_indicator_cards` 调用点同步改。
-8. **单位契约**：IndexDetail 出口即亿元/万手，UI 直接 format，禁止再换算（03 §3.2 纪律；01 §1.5.6 坑 3 的 `{:.2}` 截断字符串前科仍在）。
+8. **单位契约**：DetailQuote 出口即亿元/万手，UI 直接 format，禁止再换算（03 §3.2 纪律；01 §1.5.6 坑 3 的 `{:.2}` 截断字符串前科仍在）。
 9. **直接接轮询，不写双通道**：spawn_polling 先 fetch 后 sleep，启动即有首帧；"一次性请求预热 + 轮询"是两套代码加一段回填竞态，纯负资产。
 10. **详情页关闭后回到当前菜单面板**（现状默认 ranklist），渲染分流不要写死"返回=总览"。
+11. **DetailTarget 用访问器不用解构**：面板/桥接层若写 `let DetailTarget::Index { .. } = ...` 解构，加 Stock 变体后 match 不穷尽直接编译失败，且把面板绑死在指数变体上——统一走 `target.secid()/code()/name()`（§4.1.2）。
+12. **榜单入口的领涨股没有 code**：`StockBoard` 现只存领涨股名字符串（leading_stock），要做"点击领涨股进详情页"必须先在 clist 解析层补 code/market 字段（§4.10.1），名字字符串拼不出 secid。
 
 ---
 
 ## 4.9 实现顺序（每步可验证）
 
-| 步 | 内容 | 验证 |
-|----|------|------|
-| 1 | stock-data：normalize → IndexDetail 模型 → parse_index_detail_row → index_secid → index_detail/index_timeline → lib.rs 出口 | `cargo test -p stock-data`（含 wiremock + smoke --ignored） |
-| 2 | bridge.rs 两个 start_polling | `cargo check -p stock-app` |
-| 3 | polling_util.rs 抽取 + OverviewPanel 迁移（删私有版） | `cargo check`；跑应用确认总览轮询行为不变 |
-| 4 | app.rs 导航（DetailTarget / active_detail / observe / 渲染分流 / 侧边栏清理）+ OverviewPanel 卡片点击 + cursor_pointer | 跑应用：点击卡片出现空白详情页占位（面板可先返回空 div） |
-| 5 | IndexDetailPanel 骨架（无图表）：头部 + 指标行 | 跑应用：行情头数据与东财对账 |
-| 6 | 分时图（双 LineChart 叠层 + y_domain + 空态） | 跑应用：图形/对齐/昨收线/tooltip；盘中观察 5s 推进 |
-| 7 | 测试补齐 + §4.7.4 全量手动验收 | `cargo test -p stock-data -p stock-app` 全绿 |
+| 步  | 内容                                                                                                                                        | 验证                                                        |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| 1   | stock-data：normalize → opt_f64_field → DetailQuote 模型 → parse_quote_detail_row → index_secid → quote_detail/quote_timeline → lib.rs 出口 | `cargo test -p stock-data`（含 wiremock + smoke --ignored） |
+| 2   | bridge.rs 两个 start_polling                                                                                                                | `cargo check -p stock-app`                                  |
+| 3   | polling_util.rs 抽取 + OverviewPanel 迁移（删私有版）                                                                                       | `cargo check`；跑应用确认总览轮询行为不变                   |
+| 4   | app.rs 导航（DetailTarget 双变体 + 访问器 / active_detail / observe / 渲染分流 / 侧边栏清理）+ OverviewPanel 卡片点击 + cursor_pointer      | 跑应用：点击卡片出现空白详情页占位（面板可先返回空 div）    |
+| 5   | DetailPanel 骨架（无图表）：头部 + 指标行                                                                                                   | 跑应用：行情头数据与东财对账                                |
+| 6   | 分时图（双 LineChart 叠层 + y_domain + 空态）                                                                                               | 跑应用：图形/对齐/昨收线/tooltip；盘中观察 5s 推进          |
+| 7   | 测试补齐 + §4.7.4 全量手动验收                                                                                                              | `cargo test -p stock-data -p stock-app` 全绿                |
 
 > 实现完成后回写：本文 §4.6 核对表若与实际版本 API 有出入，按实际为准修订；DEV_PLAN 进度表 T4.6 状态同步更新。
+
+---
+
+## 4.10 个股详情接入路径（本期不实现，通道已留）
+
+> 通用骨架在 MVP 各步已就位：`DetailTarget::Stock` 变体（§4.1.2）、`DetailQuote` 个股扩展字段（§4.2.2）、`quote_detail`/`quote_timeline` 本身就是按 secid 通用的（§4.2.5）。个股接入 = **加一个入口 + 显示扩展行**，预计半天。
+
+### 4.10.1 入口场景与 secid 来源
+
+| 入口       | 触发点                           | secid 来源                                | 前置数据工作                                                                                                             |
+| ---------- | -------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| 榜单领涨股 | RanklistPanel "领涨股"单元格点击 | `f13.f12` 拼接（最稳）                    | ⚠️ `StockBoard` 现只存领涨股名字符串，需在 clist 解析层补 `leading_stock_code`/`leading_stock_market` 字段（§4.8 坑 12） |
+| 自选列表行 | WatchlistPanel（未实现，T2.3）   | 行点击时 `secid()` 规则函数（对个股可靠） | watchlist.json 建议直接存 secid，免规则推导                                                                              |
+| 搜索结果   | suggest 搜索（T4.5）             | suggest 返回自带 market/code → 拼接       | 无                                                                                                                       |
+
+### 4.10.2 接入步骤
+
+1. 入口侧构造 `DetailTarget::Stock { secid, code, name }` 写 `app_state.active_detail`——照抄 §4.4.2 ④ 的 on_click 模式，只换枚举变体
+2. **无需改动**：DetailPanel / bridge 两个 start_polling / client 两方法 / 导航 observe——全部按 secid 工作（访问器保证面板不关心变体）
+3. 行情头个股扩展行自动出现（DetailQuote 扩展字段有值 → when_some 渲染，§4.4.5 render_quote_grid 注释）
+4. 个股专属功能（日 K CandlestickChart / 资金流 / F10）在 match `DetailTarget::Stock` 分派下加 Tab 或区块——枚举变体的意义就在这里
+
+### 4.10.3 注意
+
+- **北交所**：`secid()` 现规则拒绝 8/4/92 开头（T1.3 设计如此），个股入口 MVP 限沪深；要支持需扩展规则函数，且北交所个股存在 f2 返回特殊标记（`s:2048`）的形态，实现时先 curl 验证容错
+- **trends2 个股契约**：f51-f58 字段与指数完全一致（同一接口），若实测有出入以 curl 为准回写本文
+- **个股停牌**：quote_detail 的 volume=0 / 分时 points 为空 → 详情页复用现有空态占位，无需新逻辑
