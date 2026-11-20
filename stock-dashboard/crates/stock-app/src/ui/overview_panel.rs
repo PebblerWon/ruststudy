@@ -107,7 +107,7 @@ impl OverviewPanel {
             cx,
             |bridge, tx| bridge.start_polling_industry_board(tx),
             |s, data| {
-                println!("polling_handle4 {:?}", data);
+                // println!("polling_handle4 {:?}", data);
                 s.industry_board = data;
             },
         );

@@ -372,7 +372,6 @@ impl EastmoneyClient {
         let v = self.get_json(&url).await?;
         let data = raw::take_data(&v, "clist/get")?;
         let mut out = Vec::with_capacity(500);
-        println!("{:?}", data);
         out.extend(
             data["diff"]
                 .as_array()

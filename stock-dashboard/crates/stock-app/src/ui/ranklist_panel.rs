@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use crate::bridge::{self, DataBridge};
 use crate::ui::theme::{AppThemePalette, theme_palette};
+use gpui_kit::base::StyledExt;
 use gpui_kit::component::{ActiveTheme as _, Sizable as _};
 
 use chrono::Utc;
@@ -17,6 +18,7 @@ use stock_data::{PollingHandle, StockBoard};
 fn cell(child: impl IntoElement) -> AnyElement {
     div()
         .h_full()
+        .text_xs()
         .flex()
         .items_center()
         .child(child)
@@ -78,7 +80,7 @@ impl MyTableDelegate {
             data,
             // StockBoard 没有换手率字段，“换手”列无从渲染，直接去掉
             columns: vec![
-                Column::new("index", "排名").width(50.0),
+                Column::new("index", "排名").width(50.0).text_center(),
                 // 名称列宽度由 fit_name_column 动态计算（吃掉格子剩余宽度），这里只是初值
                 Column::new("name", "名称"),
                 Column::new("change_percent", "涨跌幅").width(80.0),
@@ -109,25 +111,64 @@ impl TableDelegate for MyTableDelegate {
         let col = &self.columns[col_ix];
         let theme = AppThemePalette::for_appearance(cx.theme().is_dark());
         match col.key.as_ref() {
-            "index" => cell(format!("{}", row_ix + 1)),
+            "index" => {
+                let bg_a = Rgba {
+                    r: 37.0 / 255.0,
+                    g: 99.0 / 255.0,
+                    b: 235.0 / 255.0,
+                    a: 0.08,
+                };
+                let color_a = rgb(0x2563eb);
+                let bg_b = rgb(0xf4f4f5);
+                let color_b = rgb(0x71717a);
+                let (bg, color) = match row_ix > 2 {
+                    false => (bg_a, color_a),
+                    true => (bg_b, color_b),
+                };
+                return cell(
+                    div()
+                        .w_6()
+                        .h_6()
+                        .rounded(px(4.0))
+                        .line_height(px(24.0))
+                        .text_center()
+                        .bg(bg)
+                        .text_color(color)
+                        .child(format!("{}", row_ix + 1)),
+                );
+            }
             "name" => cell(row.name.clone()),
             "change_percent" => cell(
                 div()
                     .text_color(percent_color(row.change_percent, &theme))
-                    .child(format!("{:+.2}", row.change_percent)),
+                    .child(format!("{:+.2}%", row.change_percent)),
             ),
             // 上下两排：领涨股名 + 涨跌幅；行高由 DataTable::with_size 保证
             "leading_stock" => v_flex()
                 .justify_center()
                 .items_center()
-                .child(row.leading_stock.clone())
+                .child(div().text_xs().child(row.leading_stock.clone()))
                 .child(
                     div()
+                        .text_xs()
                         .text_color(percent_color(row.leading_stock_change_percent, &theme))
-                        .child(format!("{:+.2}", row.leading_stock_change_percent)),
+                        .child(format!("{:+.2}%", row.leading_stock_change_percent)),
                 )
                 .into_any_element(),
-            "rise_fall" => cell(format!("{}/{}", row.rise_count, row.fall_count)),
+            "rise_fall" => cell(
+                h_flex()
+                    .child(
+                        div()
+                            .text_color(theme.color_rise)
+                            .child(row.rise_count.to_string()),
+                    )
+                    .child(div().text_color(theme.text_tertiary).child("/"))
+                    .child(
+                        div()
+                            .text_color(theme.color_fall)
+                            .child(row.fall_count.to_string()),
+                    ),
+            ),
             _ => cell(""),
         }
     }
@@ -144,8 +185,12 @@ pub struct RanklistPanel {
 impl RanklistPanel {
     pub fn new(bridge: Arc<DataBridge>, window: &mut Window, cx: &mut Context<Self>) -> Self {
         // 表格状态只创建一次；数据更新走 delegate_mut，滚动位置才不会丢
-        let industry_table = cx.new(|cx| TableState::new(MyTableDelegate::new(vec![]), window, cx));
-        let concept_table = cx.new(|cx| TableState::new(MyTableDelegate::new(vec![]), window, cx));
+        let industry_table = cx.new(|cx| {
+            TableState::new(MyTableDelegate::new(vec![]), window, cx).col_resizable(false)
+        });
+        let concept_table = cx.new(|cx| {
+            TableState::new(MyTableDelegate::new(vec![]), window, cx).col_resizable(false)
+        });
 
         let (tx, rx) = async_channel::unbounded::<Vec<StockBoard>>();
         let handel1 = bridge.start_polling_industry_board(tx);
@@ -185,25 +230,59 @@ impl RanklistPanel {
     }
 }
 impl Render for RanklistPanel {
-    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div().h_full().grid().grid_cols(2).gap_3().children(vec![
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = AppThemePalette::for_appearance(cx.theme().is_dark());
+        // grid_rows(1) 把行高钉死为容器高度（minmax(0,1fr)）：不定义行高时 grid
+        // 行高由内容撑开，标题 + 全高表格会把面板顶溢出。列内改 v_flex 纵向分配，
+        // 标题不收缩，表格 flex_1 吃掉剩余高度，数据再多也只在表格内部滚动。
+        div().h_full().grid().grid_cols(2).grid_rows(1).gap_3().children(vec![
             div()
                 .h_full()
-                .border_1()
-                .on_children_prepainted(fit_name_column(self.industry_table.clone()))
+                .v_flex()
+                .overflow_hidden()
                 .child(
-                    DataTable::new(&self.industry_table)
-                        .with_size(px(48.))
-                        .header_row_height(px(36.)),
+                    div()
+                        .flex_shrink_0()
+                        .text_sm()
+                        .text_color(theme.text_primary)
+                        .child("行业板块"),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .border_1()
+                        .text_xs()
+                        .on_children_prepainted(fit_name_column(self.industry_table.clone()))
+                        .child(
+                            DataTable::new(&self.industry_table)
+                                .with_size(px(48.))
+                                .header_row_height(px(30.)),
+                        ),
                 ),
             div()
                 .h_full()
-                .border_1()
-                .on_children_prepainted(fit_name_column(self.concept_table.clone()))
+                .v_flex()
+                .overflow_hidden()
                 .child(
-                    DataTable::new(&self.concept_table)
-                        .with_size(px(48.))
-                        .header_row_height(px(36.)),
+                    div()
+                        .flex_shrink_0()
+                        .text_sm()
+                        .text_color(theme.text_primary)
+                        .child("概念板块"),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .border_1()
+                        .text_xs()
+                        .on_children_prepainted(fit_name_column(self.concept_table.clone()))
+                        .child(
+                            DataTable::new(&self.concept_table)
+                                .with_size(px(48.))
+                                .header_row_height(px(30.)),
+                        ),
                 ),
         ])
     }
